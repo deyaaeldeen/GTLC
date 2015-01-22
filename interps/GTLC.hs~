@@ -1,0 +1,33 @@
+module GTLC where
+
+data BasicType = Int | Boolean deriving (Show,Eq,Read)
+data Type = B BasicType | Fun Type Type | Dyn
+data Constant = N BasicType | T BasicType | F BasicType
+data Operator = Inc | Dec | ZeroQ
+type BlameLabel = String
+type Var = String
+data Expression 
+    = C Constant 
+    | Op Operator Expression BlameLabel 
+    | If Expression Expression Expression BlameLabel 
+    | V Var
+    | App Expression Expression BlameLabel
+    | Lam Var Expression
+    | TLam Var Type Expression
+    | Cast Expression BlameLabel
+
+consistentQ :: Type -> Type -> Bool
+consistentQ _ Dyn = True
+consistentQ Dyn _ = True
+consistentQ (B Int) (B Int) = True
+consistentQ (B Boolean) (B Boolean) = True
+consistentQ (Fun t11 t12) (Fun t21 t22) = (consistentQ t11 t21) && (consistentQ t12 t22)
+consistentQ _ _ = False
+
+meet :: Type -> Type -> Maybe Type
+meet t Dyn = Just t
+meet Dyn t = t
+meet (B Int) t@(B Int) = t
+meet (B Boolean) t@(B Boolean) = t
+meet (Fun t11 t12) (Fun t21 t22) = Fun (meet t11 t21) (meet t12 t22)
+meet _ _ = None
