@@ -1,39 +1,13 @@
 {-# LANGUAGE NamedFieldPuns, FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module GTLC where
+module TypeChecker(runTypeCheck) where
 
 import Control.Monad.Error
 import Control.Monad.Reader
 import qualified Data.Map as Map
 
-data Operator = Inc | Dec | ZeroQ deriving (Show,Eq,Read)
-data Exp =
-  N Int
-  | B Bool
-  | Op Operator Exp BlameLabel
-  | If Exp Exp Exp BlameLabel 
-  | Var Name
-  | App Exp Exp BlameLabel
-  | Lam Name Exp
-  | AnnLam (Name,Type) Exp
-  | Cast Exp BlameLabel Type
-    --Intermediate language
-  | IOp Operator Exp
-  | ICast Exp BlameLabel Type Type
-  | IApp Exp Exp
-  | IIf Exp Exp Exp
-  deriving (Show,Eq,Read)
-
-data Type =
-  Dyn
-  | IntTy
-  | BoolTy
-  | Fun Type Type
-  deriving (Show,Eq,Read)
-
-type BlameLabel = String
-type Name = String
+import Syntax
 
 -- | Computes the greatest lower bound with respect to the ordering relation “less or equally dynamic”.
 meet :: Type -> Type -> Maybe Type
@@ -51,7 +25,7 @@ meet _ _ = Nothing
 
 -- | Checks if two types are consistent.
 consistentQ :: Type -> Type -> Bool
-consistentQ t1 t2 = maybe False (\_ -> True) (meet t1 t2)
+consistentQ t1 t2 = maybe False (const True) (meet t1 t2)
 
 
 -- | Computes the type of a constant or operator.
@@ -65,8 +39,8 @@ typeof _ = undefined
 
 
 -- | Wraps a run-time cast around the expression if the two types are different.
-mk_cast :: BlameLabel -> Exp -> Type -> Type -> Exp
-mk_cast l e t1 t2 = if t1 == t2 then e else (ICast e l t1 t2)
+mkCast :: BlameLabel -> Exp -> Type -> Type -> Exp
+mkCast l e t1 t2 = if t1 == t2 then e else (ICast e l t1 t2)
 
 -- | Modeling the environment and the error monads
 
@@ -97,7 +71,7 @@ instance Show Err where
   show (CastBetweenInconsistentTypes t1 t2) = "You can not cast between " ++ show t1 ++ " and " ++ show t2 ++ " because they are inconsistent"
   show (UnknownError s) = s
 
-type TcMonad = ErrorT Err (Reader Gamma)
+type TcMonad = ReaderT Gamma (ErrorT Err IO)
 
 -- | Look for the type of a variable in the context
 -- throwing an error if the name doesn't exist.
@@ -112,19 +86,25 @@ extendCtx (x,t) = local (\ m@(Gamma {ctx = cs}) -> m { ctx = Map.insert x t cs }
 typecheck :: Exp -> TcMonad (Exp,Type)
 typecheck e@(N _) = return (e, (typeof e))
 typecheck e@(B _) = return (e, (typeof e))
-typecheck e@(Op op e1 l) = typecheck e1 >>= \ (e2, t) -> let (Fun t1 t2) = typeof e in if (consistentQ t t1) then return ((IOp op (mk_cast l e2 t t1)), t2) else throwError (PrimitiveOperator op t)
+typecheck e@(Op op e1 l) = typecheck e1 >>= \ (e2, t) -> let (Fun t1 t2) = typeof e in if (consistentQ t t1) then return ((IOp op (mkCast l e2 t t1)), t2) else throwError (PrimitiveOperator op t)
 typecheck (If e e1 e2 l) = typecheck e >>= \ (te, t1) -> typecheck e1 >>= \ (te1, t2) -> typecheck e2 >>= \ (te2, t3) -> if (consistentQ t1 BoolTy) && (consistentQ t2 t3) then
     case (meet t2 t3) of
-     Just if_T -> return ((IIf (mk_cast l te t1 BoolTy) (mk_cast l te1 t2 if_T) (mk_cast l te2 t3 if_T)), if_T)
+     Just if_T -> return ((IIf (mkCast l te t1 BoolTy) (mkCast l te1 t2 if_T) (mkCast l te2 t3 if_T)), if_T)
      Nothing -> throwError (IllTypedIfExp "The two arms of the If expression do not have consistent types")
     else
     throwError (IllTypedIfExp "The condition of the If expression is not consistent with the boolean type")
 typecheck e@(Var x) = lookupTy x >>= \t -> return (e,t)
 typecheck (Lam x e) = typecheck (AnnLam (x,Dyn) e)
-typecheck (AnnLam v@(x,t) e) = extendCtx v (typecheck e) >>= \ (e1,t1) -> return ((AnnLam (x,t) e1),(Fun t t1))
-typecheck (Cast e l t) = (typecheck e) >>= \ (e2,t2) -> if (consistentQ t2 t) then return ((mk_cast l e2 t2 t),t) else throwError (CastBetweenInconsistentTypes t2 t)
+typecheck (AnnLam v@(_,t) e) = extendCtx v (typecheck e) >>= \ (e1,t1) -> return ((AnnLam v e1),(Fun t t1))
+typecheck (Cast e l t) = (typecheck e) >>= \ (e2,t2) -> if (consistentQ t2 t) then return ((mkCast l e2 t2 t),t) else throwError (CastBetweenInconsistentTypes t2 t)
 typecheck (App e1 e2 l) = typecheck e2 >>= \ (e4,t) -> (typecheck e1) >>= \ g -> case g of
-                                                                                  (e3, Dyn) -> return ((IApp (mk_cast l e3 Dyn (Fun t Dyn)) e4),Dyn)
-                                                                                  (e3, (Fun t21 t22)) -> if (consistentQ t t21) then return ((IApp e3 (mk_cast l e4 t (Fun t t21))), t22) else throwError (ArgParamMismatch t21 t)
+                                                                                  (e3, Dyn) -> return ((IApp (mkCast l e3 Dyn (Fun t Dyn)) e4),Dyn)
+                                                                                  (e3, (Fun t21 t22)) -> if (consistentQ t t21) then return ((IApp e3 (mkCast l e4 t (Fun t t21))), t22) else throwError (ArgParamMismatch t21 t)
                                                                                   _ -> throwError CallNonFunction
-typecheck _ = undefined
+typecheck _ = throwError (UnknownError "Unknown Error!")
+
+runTcMonad :: Gamma -> TcMonad a -> IO (Either Err a)
+runTcMonad gamma m = runErrorT $ runReaderT m gamma
+
+runTypeCheck :: Exp -> IO (Either Err (Exp, Type))
+runTypeCheck e = runTcMonad (Gamma {ctx = Map.empty}) (typecheck e)
