@@ -19,7 +19,7 @@ instance Arbitrary Operator where
   arbitrary = elements [Inc,Dec,ZeroQ]
 
 instance Arbitrary Type where
-  arbitrary = liftM2 Fun arbitrary arbitrary >>= \f -> elements [IntTy,BoolTy,Dyn, f]
+  arbitrary = liftM2 Fun arbitrary arbitrary >>= \f -> elements [IntTy,BoolTy, f]
 
 
 -- | generate a variable name
@@ -63,9 +63,20 @@ genExpBool :: Gen Exp -> Gen Exp
 genExpBool e = liftM3 Op (return ZeroQ) e (return "")
 
 
--- | Generates arbitrary types
+-- | Generates arbitrary type
 genType :: Gen Type
 genType = arbitrary
+
+
+-- | Returns a list of consistent types for some type
+consistent :: Type -> [Type]
+consistent (Fun t1 t2) = (zipWith Fun (consistent t1) (consistent t2))
+consistent t = [t]
+
+
+-- | Generates a random consistent type for a specific type
+genConsistentType :: Type -> Gen Type
+genConsistentType t = elements $ consistent t
 
 
 -- | Generates application expressions
@@ -73,7 +84,7 @@ genExpApp :: Gen Type -> TsMonad Exp
 genExpApp t = ask >>= \gamma -> let s = size gamma in
   if s > 0
   then
-    lift t >>= \t2 -> lift $ genType >>= \t1 -> liftM3 App (runReaderT (genExp $ return (Fun t1 t2)) gamma) (runReaderT (genExp $ return t1) gamma) (return "")
+    lift t >>= \t2 -> lift $ genType >>= \t1 -> elements [t1,Dyn] >>= \td -> liftM3 App (runReaderT (genExp $ return (Fun td t2)) gamma) (runReaderT (genExp $ genConsistentType t1) gamma) (return "")
   else
     genExp t
 
@@ -83,34 +94,29 @@ genExp :: Gen Type -> TsMonad Exp
 genExp t = lift t >>= \tp -> ask >>= \gamma -> pickName tp >>= \randVar ->
   let s = size gamma in
    case tp of
-    IntTy -> let nats = (1,liftM N arbitrary)
-                 values = maybe [nats] (\x->[(2,x), nats]) randVar in
+    IntTy -> let values = (1,liftM N arbitrary):(maybe [] (\x->[(2,x)]) randVar) in
               if s > 0
               then
                 lift $ frequency (values ++ [(3,runReaderT (genExpIf tp) gamma),(4,runReaderT (genExpInt $ liftM N arbitrary) gamma),(4,runReaderT (mSize (s `div` 2) (genExpApp t)) gamma)])
               else
                 lift $ frequency values
-    BoolTy -> let bools = (1,liftM B arbitrary)
-                  values = maybe [bools] (\x->[(2,x), bools]) randVar in
+    BoolTy -> let values = (1,liftM B arbitrary):(maybe [] (\x->[(2,x)]) randVar) in
                if s > 0
                then
                  lift $ frequency (values ++ [(3,runReaderT (genExpIf tp) gamma),(4,genExpBool (runReaderT (genExpInt $ liftM N arbitrary) gamma)),(4,runReaderT (mSize (s `div` 2) (genExpApp t)) gamma)])
                else
                  lift $ frequency values
-    (Fun t1 t2) -> let funs = [(1,runReaderT (mSize (s-1) (genExpLam t1 t2)) gamma),(1,runReaderT (mSize (s-1) (genExpAnnLam t1 t2)) gamma)]
-                       values = maybe funs (\x-> (2,x):funs) randVar in
+    (Fun t1 t2) -> let values = (1,runReaderT (mSize (s-1) (genExpAnnLam t1 t2)) gamma):(1,runReaderT (mSize (s-1) (genExpLam t1 t2)) gamma):(maybe [] (\x-> [(2,x)]) randVar) in
                     if s > 0
                     then
                       lift $ frequency (values ++ [(3,runReaderT (genExpIf tp) gamma),(4,runReaderT (mSize (s `div` 2) (genExpApp t)) gamma)])
                     else
                       lift $ frequency values
-    Dyn -> let values = maybe [] (\x->[(2,x)]) randVar in
-            lift (liftM N arbitrary)
 
 
 -- | Generates if expressions
 genExpIf :: Type -> TsMonad Exp
-genExpIf t = ask >>= \gamma -> liftM4 If (mSize ((size gamma) `div` 3) (genExp $ return BoolTy)) (mSize ((size gamma) `div` 3) (genExp $ return t)) (mSize ((size gamma)-1) (genExp $ return t)) (return "")
+genExpIf t = ask >>= \gamma -> liftM4 If (mSize ((size gamma) `div` 3) (genExp $ genConsistentType BoolTy)) (mSize ((size gamma) `div` 3) (genExp $ genConsistentType t)) (mSize ((size gamma)-1) (genExp $ genConsistentType t)) (return "")
 
 
 -- | Generates a lambda abstraction without annotation

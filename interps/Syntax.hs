@@ -1,7 +1,5 @@
 module Syntax where
 
-import Test.QuickCheck
-
 data Operator = Inc | Dec | ZeroQ deriving (Show,Eq,Read)
 
 data Exp =
