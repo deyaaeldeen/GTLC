@@ -19,6 +19,13 @@ data Exp =
   | IIf Exp Exp Exp
   deriving (Show,Eq,Read)
 
+data Value =
+  VN Int
+  | VB Bool
+  | VLam Name Value
+  | VCast BlameLabel Value Type Type
+  | Blame BlameLabel
+
 data Type =
   Dyn
   | IntTy
@@ -29,3 +36,16 @@ data Type =
 type BlameLabel = String
 
 type Name = String
+
+
+expToVal :: Exp -> Value
+expToVal (N x) = (VN x)
+expToVal (B x) = (VB x)
+expToVal (Lam x e) = (VLam x (expToVal e))
+expToVal _ = undefined
+
+valToExp :: Value -> Exp
+valToExp (VN x) = (N x)
+valToExp (VB x) = (B x)
+valToExp (VLam x e) = (Lam x (valToExp e))
+valToExp _ = undefined

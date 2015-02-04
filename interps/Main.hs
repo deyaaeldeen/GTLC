@@ -7,4 +7,3 @@ import Testing
 main :: IO ()
 main = do
   test5
-  return ()

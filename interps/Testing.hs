@@ -1,10 +1,9 @@
 {-# LANGUAGE TemplateHaskell, FlexibleContexts #-}
+{-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
 module Testing(test,test5) where
 
-import Control.Applicative
 import Control.Monad.Reader
-import Data.Maybe
 import Test.QuickCheck
 import Test.QuickCheck.Monadic
 
@@ -35,7 +34,7 @@ elementsMaybe xs = Just (elements xs)
 
 -- | Randomly selects a variable that has a specific type from the context
 pickName :: MonadReader Gamma m => Type -> m (Maybe (Gen Exp))
-pickName t1 = asks ctx >>= \ctx -> return (elementsMaybe [Var x | (x,t2) <- ctx, t2 == t1])
+pickName t1 = asks ctx >>= \c -> return (elementsMaybe [Var x | (x,t2) <- c, t2 == t1])
 
 
 -- | Changes the size field of a gamma
@@ -50,10 +49,10 @@ extendCtx v = local (\ m@(Gamma {ctx = cs}) -> m { ctx = v:cs })
 
 -- | Generates expressions for int expressions
 genExpInt :: Gen Exp -> TsMonad Exp
-genExpInt e = asks size >>= \size ->
-  if size > 0
+genExpInt e = asks size >>= \s ->
+  if s > 0
   then
-    (mSize (size-1)) $ genExpInt $ liftM3 Op (elements [Inc,Dec]) e (return "")
+    (mSize (s-1)) $ genExpInt $ liftM3 Op (elements [Inc,Dec]) e (return "")
   else
     lift e
 
@@ -112,6 +111,7 @@ genExp t = lift t >>= \tp -> ask >>= \gamma -> pickName tp >>= \randVar ->
                       lift $ frequency (values ++ [(3,runReaderT (genExpIf tp) gamma),(4,runReaderT (mSize (s `div` 2) (genExpApp t)) gamma)])
                     else
                       lift $ frequency values
+    Dyn -> undefined
 
 
 -- | Generates if expressions
@@ -140,5 +140,8 @@ prop_id e = monadicIO $ do t <- run $ runTypeCheck e
 
 
 return []
+test :: IO Bool
 test = $verboseCheckAll
+
+test5 :: IO ()
 test5 =  verboseCheckWith Args {replay=Nothing,maxSuccess=10000,maxSize=5,chatty=True,maxDiscardRatio=10} prop_id

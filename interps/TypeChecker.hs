@@ -1,7 +1,7 @@
 {-# LANGUAGE NamedFieldPuns, FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module TypeChecker(runTypeCheck) where
+module TypeChecker(runTypeCheck,mkCast) where
 
 import Control.Monad.Error
 import Control.Monad.Reader
