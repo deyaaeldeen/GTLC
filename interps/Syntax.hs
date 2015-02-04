@@ -22,7 +22,7 @@ data Exp =
 data Value =
   VN Int
   | VB Bool
-  | VLam Name Value
+  | VLam (Value -> Value)
   | VCast BlameLabel Value Type Type
   | Blame BlameLabel
 
@@ -41,11 +41,9 @@ type Name = String
 expToVal :: Exp -> Value
 expToVal (N x) = (VN x)
 expToVal (B x) = (VB x)
-expToVal (Lam x e) = (VLam x (expToVal e))
 expToVal _ = undefined
 
 valToExp :: Value -> Exp
 valToExp (VN x) = (N x)
 valToExp (VB x) = (B x)
-valToExp (VLam x e) = (Lam x (valToExp e))
 valToExp _ = undefined
