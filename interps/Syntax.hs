@@ -1,4 +1,33 @@
+{-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
+
 module Syntax where
+
+import Text.Show.Functions
+import Control.Monad.Error
+import Control.Monad.Reader
+import qualified Data.Map as Map
+
+
+type EvMonad = ReaderT Env (ErrorT EvErr IO)
+
+data Env = Env { env :: Map.Map Name Value }
+
+
+data EvErr =
+  EvUnknownError String
+  | EvUndefinedVar Name
+  | EvCallNonFunctionNonCast
+  deriving (Eq)
+
+
+instance Error EvErr where
+  strMsg msg = EvUnknownError msg
+
+
+instance Show EvErr where
+  show (EvUndefinedVar v) = "The variable " ++ show v ++ " is not bounded"
+  show (EvUnknownError s) = s
+  show EvCallNonFunctionNonCast = "The expression in the function position is neither a function nor a cast of one"
 
 data Operator = Inc | Dec | ZeroQ deriving (Show,Eq,Read)
 
@@ -22,9 +51,10 @@ data Exp =
 data Value =
   VN Int
   | VB Bool
-  | VLam (Value -> Value)
+  | VLam (Value -> EvMonad Value) Exp
   | VCast BlameLabel Value Type Type
-  | Blame BlameLabel
+  | VBlame BlameLabel
+  deriving (Show)
 
 data Type =
   Dyn
@@ -32,6 +62,14 @@ data Type =
   | BoolTy
   | Fun Type Type
   deriving (Show,Eq,Read)
+
+data Observable =
+  ON Int
+  | OB Bool
+  | Function
+  | Dynamic
+  | OBlame String
+  deriving (Show,Eq)
 
 type BlameLabel = String
 
@@ -46,4 +84,6 @@ expToVal _ = undefined
 valToExp :: Value -> Exp
 valToExp (VN x) = (N x)
 valToExp (VB x) = (B x)
+valToExp (VLam _ e) = e
+--valToExp (VCast e l t1 t2) = VCast l (valToExp ) Type Type
 valToExp _ = undefined

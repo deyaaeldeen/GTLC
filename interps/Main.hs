@@ -1,9 +1,7 @@
 module Main where
 
-import Syntax
-import TypeChecker
 import Testing
+import Eval
 
 main :: IO ()
-main = do
-  test5
+main = test5

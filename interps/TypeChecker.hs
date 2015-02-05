@@ -1,7 +1,7 @@
 {-# LANGUAGE NamedFieldPuns, FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module TypeChecker(runTypeCheck,mkCast) where
+module TypeChecker(runTypeCheck,mkCast,typeof) where
 
 import Control.Monad.Error
 import Control.Monad.Reader
@@ -46,7 +46,7 @@ mkCast l e t1 t2 = if t1 == t2 then e else (ICast e l t1 t2)
 
 data Gamma = Gamma { ctx :: Map.Map Name Type }
 
-data Err =
+data TyErr =
   -- Type Errors
   PrimitiveOperator Operator Type
   | IllTypedIfExp String
@@ -56,26 +56,26 @@ data Err =
   -- Cast Errors
   | CastBetweenInconsistentTypes Type Type
   -- Unknown
-  | UnknownError String
+  | UnknownTyError String
   deriving (Eq)
 
-instance Error Err where
-  strMsg msg = UnknownError msg
+instance Error TyErr where
+  strMsg msg = UnknownTyError msg
 
-instance Show Err where
+instance Show TyErr where
   show (PrimitiveOperator op t) = "The argument to " ++ show op ++ " has the type " ++ show t ++ " which is not consistent"
   show (IllTypedIfExp s) = s
   show (ArgParamMismatch t1 t2) = "The argument to the function has type " ++ show t2 ++ " that is not consistent with the type of the function parameter " ++ show t1
   show CallNonFunction = "The expression in the function position is not of Function type"
   show (UndefinedVar v) = "The variable " ++ show v ++ " is not bounded"
   show (CastBetweenInconsistentTypes t1 t2) = "You can not cast between " ++ show t1 ++ " and " ++ show t2 ++ " because they are inconsistent"
-  show (UnknownError s) = s
+  show (UnknownTyError s) = s
 
-type TcMonad = ReaderT Gamma (ErrorT Err IO)
+type TcMonad = ReaderT Gamma (ErrorT TyErr IO)
 
 -- | Look for the type of a variable in the context
 -- throwing an error if the name doesn't exist.
-lookupTy :: (MonadReader Gamma m, MonadError Err m) => Name -> m Type
+lookupTy :: (MonadReader Gamma m, MonadError TyErr m) => Name -> m Type
 lookupTy v = asks ctx >>= \ctx -> maybe (throwError (UndefinedVar v)) return (Map.lookup v ctx)
 
 -- | Extend the context with a new binding.
@@ -101,10 +101,10 @@ typecheck (App e1 e2 l) = typecheck e2 >>= \ (e4,t) -> (typecheck e1) >>= \ g ->
                                                                                   (e3, Dyn) -> return ((IApp (mkCast l e3 Dyn (Fun t Dyn)) e4),Dyn)
                                                                                   (e3, (Fun t21 t22)) -> if (consistentQ t t21) then return ((IApp e3 (mkCast l e4 t (Fun t t21))), t22) else throwError (ArgParamMismatch t21 t)
                                                                                   _ -> throwError CallNonFunction
-typecheck _ = throwError (UnknownError "Unknown Error!")
+typecheck _ = throwError (UnknownTyError "Unknown Error!")
 
-runTcMonad :: Gamma -> TcMonad a -> IO (Either Err a)
+runTcMonad :: Gamma -> TcMonad a -> IO (Either TyErr a)
 runTcMonad gamma m = runErrorT $ runReaderT m gamma
 
-runTypeCheck :: Exp -> IO (Either Err (Exp, Type))
+runTypeCheck :: Exp -> IO (Either TyErr (Exp, Type))
 runTypeCheck e = runTcMonad (Gamma {ctx = Map.empty}) (typecheck e)
