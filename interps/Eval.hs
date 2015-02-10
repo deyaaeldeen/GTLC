@@ -72,9 +72,9 @@ interp appcast applazy (IOp Dec e) = interp appcast applazy e >>= \(VN v) -> ret
 interp appcast applazy (IOp ZeroQ e) = interp appcast applazy e >>= \(VN v) -> return $ VB(v == 0)
 interp appcast applazy (IIf e1 e2 e3) = interp appcast applazy e1 >>= \(VB v) -> if v then interp appcast applazy e2 else interp appcast applazy e3
 interp _ _ (Var v) = lookupVal v
-interp appcast applazy (IApp e1 e2) = interp appcast applazy e1 >>= \(VLam f _) -> interp appcast applazy e2 >>= \v -> f v
+interp appcast applazy (IApp e1 e2) = interp appcast applazy e1 >>= \f -> interp appcast applazy e2 >>= \v -> applazy f v
 interp appcast applazy f@(AnnLam (x,_) e) = return $ VLam (\v -> extendEnv (x,v) (interp appcast applazy e)) f
-interp appcast applazy (ICast e l t1 t2) = (interp appcast applazy e) >>= \v -> return $ VCast l v t1 t2
+interp appcast applazy (ICast e l t1 t2) = (interp appcast applazy e) >>= \v -> return $ appcast l v t1 t2
 interp _ _ _ = undefined -- Not defined on the surface language
 
 

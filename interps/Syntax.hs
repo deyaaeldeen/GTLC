@@ -79,11 +79,12 @@ type Name = String
 expToVal :: Exp -> Value
 expToVal (N x) = (VN x)
 expToVal (B x) = (VB x)
+expToVal (ICast e l t1 t2) = (VCast l (expToVal e) t1 t2)
 expToVal _ = undefined
 
 valToExp :: Value -> Exp
 valToExp (VN x) = (N x)
 valToExp (VB x) = (B x)
 valToExp (VLam _ e) = e
---valToExp (VCast e l t1 t2) = VCast l (valToExp ) Type Type
+valToExp (VCast l e t1 t2) = Cast (valToExp e) l t2
 valToExp _ = undefined

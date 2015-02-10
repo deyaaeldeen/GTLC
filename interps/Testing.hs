@@ -135,16 +135,16 @@ instance Arbitrary Exp where
 prop_id :: Exp -> Property
 prop_id e = monadicIO $ do et1 <- run $ runTypeCheck e
                            _ <- case et1 of
-                             Right (ie,t1) ->
-                               do ve <- run $ interpLD $ ie
-                                  case ve of
-                                   Right v -> do et2 <- run $ runTypeCheck (valToExp v)
-                                                 _ <- case et2 of
-                                                       Right (_,t2) -> assert $ t1 == t2
-                                                       Left _ -> fail "does not type check 1"
-                                                 return ()
-                                   Left _ -> fail "does not evaluate"
-                             Left _ -> fail "does not type check 2"
+                                 Right (ie,t1) ->
+                                   do ve <- run $ interpLD ie
+                                      case ve of
+                                       Right v -> do et2 <- run $ runTypeCheck (valToExp v)
+                                                     _ <- case et2 of
+                                                           Right (_,t2) -> assert $ t1 == t2
+                                                           Left _ -> fail "does not type check 1"
+                                                     return ()
+                                       Left _ -> fail "does not evaluate"
+                                 Left _ -> fail "does not type check 2"
                            return ()
 
 
