@@ -99,7 +99,7 @@ typecheck (AnnLam v@(_,t) e) = extendCtx v (typecheck e) >>= \ (e1,t1) -> return
 typecheck (Cast e l t) = (typecheck e) >>= \ (e2,t2) -> if (consistentQ t2 t) then return ((mkCast l e2 t2 t),t) else throwError (CastBetweenInconsistentTypes t2 t)
 typecheck (App e1 e2 l) = typecheck e2 >>= \ (e4,t) -> (typecheck e1) >>= \ g -> case g of
                                                                                   (e3, Dyn) -> return ((IApp (mkCast l e3 Dyn (Fun t Dyn)) e4),Dyn)
-                                                                                  (e3, (Fun t21 t22)) -> if (consistentQ t t21) then return ((IApp e3 (mkCast l e4 t (Fun t t21))), t22) else throwError (ArgParamMismatch t21 t)
+                                                                                  (e3, (Fun t21 t22)) -> if (consistentQ t t21) then return ((IApp e3 (mkCast l e4 t t21)), t22) else throwError (ArgParamMismatch t21 t)
                                                                                   _ -> throwError CallNonFunction
 typecheck _ = throwError (UnknownTyError "Unknown Error!")
 
