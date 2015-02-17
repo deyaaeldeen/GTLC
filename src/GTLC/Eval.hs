@@ -1,14 +1,14 @@
 {-# LANGUAGE NamedFieldPuns, FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module Eval(interpLD) where
+module GTLC.Eval(interpLD) where
 
 import Control.Monad.Error
 import Control.Monad.Reader
 import qualified Data.Map as Map
 
-import Syntax
-import TypeChecker
+import GTLC.Syntax
+import GTLC.TypeChecker
 
 
 -- | Look for the value of a variable in the environment

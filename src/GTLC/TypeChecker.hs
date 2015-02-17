@@ -1,13 +1,13 @@
 {-# LANGUAGE NamedFieldPuns, FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module TypeChecker(runTypeCheck,mkCast,typeof) where
+module GTLC.TypeChecker(runTypeCheck,mkCast,typeof) where
 
 import Control.Monad.Error
 import Control.Monad.Reader
 import qualified Data.Map as Map
 
-import Syntax
+import GTLC.Syntax
 
 -- | Computes the greatest lower bound with respect to the ordering relation “less or equally dynamic”.
 meet :: Type -> Type -> Maybe Type

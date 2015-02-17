@@ -1,15 +1,16 @@
-{-# LANGUAGE TemplateHaskell, FlexibleContexts #-}
+{-# LANGUAGE TemplateHaskell, FlexibleContexts, NamedFieldPuns #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module Testing(test,test5) where
+module Test where
 
 import Control.Monad.Reader
 import Test.QuickCheck
 import Test.QuickCheck.Monadic
+import qualified Distribution.TestSuite as TS
 
-import TypeChecker
-import Syntax
-import Eval
+import GTLC.TypeChecker
+import GTLC.Syntax
+import GTLC.Eval
 
 data Gamma = Gamma {ctx :: [(Name,Type)], size :: Int}
 
@@ -132,25 +133,40 @@ genExpAnnLam t1 t2 = ask >>= \gamma -> lift $ genName >>= \x -> liftM2 AnnLam (r
 instance Arbitrary Exp where
       arbitrary = sized $ \n -> runReaderT (genExp arbitrary) Gamma {ctx=[],size=n}
 
-prop_id :: Exp -> Property
-prop_id e = monadicIO $ do et1 <- run $ runTypeCheck e
-                           _ <- case et1 of
-                                 Right (ie,t1) ->
-                                   do ve <- run $ interpLD ie
-                                      case ve of
-                                       Right v -> do et2 <- run $ runTypeCheck (valToExp v)
-                                                     _ <- case et2 of
-                                                           Right (_,t2) -> assert $ t1 == t2
-                                                           Left _ -> fail "does not type check 1"
-                                                     return ()
-                                       Left _ -> fail "does not evaluate"
-                                 Left _ -> fail "does not type check 2"
-                           return ()
+propTypePres :: Exp -> Property
+propTypePres e = monadicIO $ do et1 <- run $ runTypeCheck e
+                                _ <- case et1 of
+                                      Right (ie,t1) ->
+                                        do ve <- run $ interpLD ie
+                                           case ve of
+                                            Right v -> do et2 <- run $ runTypeCheck (valToExp v)
+                                                          _ <- case et2 of
+                                                                Right (_,t2) -> assert $ t1 == t2
+                                                                Left _ -> fail "does not type check 1"
+                                                          return ()
+                                            Left _ -> fail "does not evaluate"
+                                      Left _ -> fail "does not type check 2"
+                                return ()
 
+
+toTSResult :: Result -> TS.Result
+toTSResult Success {} = TS.Pass
+toTSResult GaveUp {} = TS.Fail "GaveUp"
+toTSResult Failure {reason} = TS.Fail reason
+
+runQuickCheck :: Testable p => p -> IO TS.Progress
+runQuickCheck prop = do
+        qres <- quickCheckWithResult stdArgs {maxSuccess = 30, maxSize = 20} prop
+        return $ (TS.Finished . toTSResult) qres
+
+tests :: IO [TS.Test]
+
+tests = return [TS.Test $ TS.TestInstance (runQuickCheck propTypePres) 
+                                    "Type Preservation" ["tag"] [] undefined]
 
 return []
-test :: IO Bool
-test = $verboseCheckAll
+--main :: IO Bool
+--main = $verboseCheckAll
 
-test5 :: IO ()
-test5 =  verboseCheckWith Args {replay=Nothing,maxSuccess=10000,maxSize=5,chatty=True,maxDiscardRatio=10} prop_id
+main :: IO [TS.Test]
+main =  tests --verboseCheckWith Args {replay=Nothing,maxSuccess=10000,maxSize=5,chatty=True,maxDiscardRatio=10} prop_id

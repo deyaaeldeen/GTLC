@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module Syntax where
+module GTLC.Syntax where
 
 import Text.Show.Functions
 import Control.Monad.Error
