@@ -7,6 +7,8 @@ import Control.Monad.Error
 import Control.Monad.Reader
 import qualified Data.Map as Map
 
+import Debug.Trace
+
 import GTLC.Syntax
 import GTLC.TypeChecker
 
@@ -19,7 +21,7 @@ lookupVal v = asks env >>= \env -> maybe (throwError (EvUndefinedVar v)) return 
 
 -- | Extend the context with a new binding.
 extendEnv :: (MonadReader Env m) => (Name, Value) -> m a -> m a
-extendEnv (x,v) = local (\ m@(Env {env = en}) -> m { env = Map.insert x v en })
+extendEnv (x,v) = local (\ m@(Env {env = en}) -> trace ("\n\nextendingggggggg: " ++ (show $ Map.insert x v en)) m { env = Map.insert x v en })
 
 
 -- | Defines shallow consistency relation that we use to determine whether to report cast error.
@@ -32,6 +34,11 @@ shallowConsistentQ (Fun _ _) (Fun _ _) = True
 shallowConsistentQ _ _ = False
 
 
+-- | Wraps a run-time cast around a value if the two types are different.
+mkCast :: BlameLabel -> Value -> Type -> Type -> Value
+mkCast l v t1 t2 = if t1 == t2 then v else (VCast l v t1 t2)
+
+
 -- | Performs run-time cast on a value using downcast approach.
 applyCastLD :: BlameLabel -> Value -> Type -> Type -> Value
 applyCastLD l v t1 t2 = if shallowConsistentQ t1 t2
@@ -39,31 +46,42 @@ applyCastLD l v t1 t2 = if shallowConsistentQ t1 t2
                           case t1 of
                           Dyn -> case v of
                             (VCast l2 v2 t3 Dyn) -> applyCastLD l v t3 t2
-                            _ -> expToVal $ mkCast l (valToExp v) t1 t2
-                          _ -> expToVal $ mkCast l (valToExp v) t1 t2
+                            _ -> mkCast l v t1 t2
+                          _ -> mkCast l v t1 t2
                         else
                           VBlame l
+
+
+-- | Substitution
+substExp :: Exp -> Name -> Value -> Exp
+substExp (Op op e l) var val = Op op (substExp e var val) l
+substExp (If e1 e2 e3 l) var val = If (substExp e1 var val) (substExp e2 var val) (substExp e3 var val) l
+substExp (App e1 e2 l) var val = App (substExp e1 var val) (substExp e2 var val) l
+substExp (Cast e l t) var val = Cast (substExp e var val) l t
+substExp (IOp op e) var val = IOp op (substExp e var val)
+substExp (IIf e1 e2 e3) var val = IIf (substExp e1 var val) (substExp e2 var val) (substExp e3 var val)
+substExp v@(Var x) var val = if x == var then valToExp val else v
+substExp (IApp e1 e2) var val = IApp (substExp e1 var val) (substExp e2 var val)
+substExp (AnnLam x e) var val = AnnLam x (substExp e var val)
+substExp (ICast e l t1 t2) var val = ICast (substExp e var val) l t1 t2
+substExp e _ _ = e
+
+
+substVal :: Value -> Name -> Value -> Value
+substVal (VLam f e) var val = VLam f (substExp e var val)
+substVal (VCast l v t1 t2) var val = VCast l (substVal v var val) t1 t2
+substVal v _ _ = v
 
 
 -- | Performs function application.
 applyLazy :: Value -> Value -> EvMonad Value
 applyLazy (VCast l v (Fun t1 t2) (Fun t3 t4)) v2 = applyLazy v (applyCastLD l v2 t3 t1) >>= \x -> return $ applyCastLD l x t2 t4
-applyLazy (VLam f _) v = f v
+applyLazy (VCast l v (Fun t1 t2) Dyn) v2 = applyLazy v v2
+applyLazy (VLam f (AnnLam (x,_) e)) v = f v >>= \y -> return $ substVal y x v
 applyLazy _ _ = throwError EvCallNonFunctionNonCast
 
-
--- | Turns the evaluation result to an observable.
-observeLazy :: Value -> Observable
-observeLazy (VN x) = (ON x)
-observeLazy (VB x) = (OB x)
-observeLazy (VLam _ _) = Function
-observeLazy (VCast _ _ _ (Fun _ _)) = Function
-observeLazy (VCast _ _ _ Dyn) = Dynamic
-observeLazy (VBlame l) = (OBlame l)
-observeLazy _ = undefined -- not defined for other casts
-
-
 -- | Interprets the intermediate language
+-- Not defined on the surface language
 interp :: (BlameLabel -> Value -> Type -> Type -> Value) -> (Value -> Value -> EvMonad Value) -> Exp -> EvMonad Value
 interp _ _ (N x) = return (VN x)
 interp _ _ (B x) = return (VB x)
@@ -75,9 +93,18 @@ interp _ _ (Var v) = lookupVal v
 interp appcast applazy (IApp e1 e2) = interp appcast applazy e1 >>= \f -> interp appcast applazy e2 >>= \v -> applazy f v
 interp appcast applazy f@(AnnLam (x,_) e) = return $ VLam (\v -> extendEnv (x,v) (interp appcast applazy e)) f
 interp appcast applazy (ICast e l t1 t2) = (interp appcast applazy e) >>= \v -> return $ appcast l v t1 t2
-interp _ _ _ = undefined -- Not defined on the surface language
 
 
 -- | Interpreter for the intermediate language with lazy down casts
 interpLD :: Exp -> IO (Either EvErr Value)
 interpLD e = runErrorT $ runReaderT (interp applyCastLD applyLazy e) (Env {env = Map.empty})
+
+
+-- | Turns the evaluation result to an observable.
+observeLazy :: Value -> Observable
+observeLazy (VN x) = (ON x)
+observeLazy (VB x) = (OB x)
+observeLazy (VLam _ _) = Function
+observeLazy (VCast _ _ _ (Fun _ _)) = Function
+observeLazy (VCast _ _ _ Dyn) = Dynamic
+observeLazy (VBlame l) = (OBlame l)

@@ -1,7 +1,7 @@
 {-# LANGUAGE NamedFieldPuns, FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module GTLC.TypeChecker(runTypeCheck,mkCast,typeof) where
+module GTLC.TypeChecker(runTypeCheck) where
 
 import Control.Monad.Error
 import Control.Monad.Reader
@@ -35,7 +35,6 @@ typeof (B _) = BoolTy
 typeof (Op Inc _ _) = Fun IntTy IntTy
 typeof (Op Dec _ _) = Fun IntTy IntTy
 typeof (Op ZeroQ _ _) = Fun IntTy BoolTy
-typeof _ = undefined
 
 
 -- | Wraps a run-time cast around the expression if the two types are different.
@@ -102,6 +101,7 @@ typecheck (App e1 e2 l) = typecheck e2 >>= \ (e4,t) -> (typecheck e1) >>= \ g ->
                                                                                   (e3, (Fun t21 t22)) -> if (consistentQ t t21) then return ((IApp e3 (mkCast l e4 t t21)), t22) else throwError (ArgParamMismatch t21 t)
                                                                                   _ -> throwError CallNonFunction
 typecheck _ = throwError (UnknownTyError "Unknown Error!")
+
 
 runTcMonad :: Gamma -> TcMonad a -> IO (Either TyErr a)
 runTcMonad gamma m = runErrorT $ runReaderT m gamma

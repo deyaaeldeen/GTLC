@@ -25,13 +25,14 @@ instance Error EvErr where
 
 
 instance Show EvErr where
-  show (EvUndefinedVar v) = "The variable " ++ show v ++ " is not bounded"
+  show (EvUndefinedVar v) = "The variable " ++ show v ++ " is not bound"
   show (EvUnknownError s) = s
   show EvCallNonFunctionNonCast = "The expression in the function position is neither a function nor a cast of one"
 
 data Operator = Inc | Dec | ZeroQ deriving (Show,Eq,Read)
 
 data Exp =
+  -- Surface language
   N Int
   | B Bool
   | Op Operator Exp BlameLabel
@@ -51,7 +52,7 @@ data Exp =
 data Value =
   VN Int
   | VB Bool
-  | VLam (Value -> EvMonad Value) Exp
+  | VLam (Value -> EvMonad Value) Exp -- closure and syntactic representation
   | VCast BlameLabel Value Type Type
   | VBlame BlameLabel
   deriving (Show)
@@ -76,15 +77,16 @@ type BlameLabel = String
 type Name = String
 
 
-expToVal :: Exp -> Value
-expToVal (N x) = (VN x)
-expToVal (B x) = (VB x)
-expToVal (ICast e l t1 t2) = (VCast l (expToVal e) t1 t2)
-expToVal _ = undefined
+intermediate2surface :: Exp -> Exp
+intermediate2surface (IIf e1 e2 e3) = (If (intermediate2surface e1) (intermediate2surface e2) (intermediate2surface e3) "")
+intermediate2surface (ICast e l t1 t2) = intermediate2surface e
+intermediate2surface (IApp e1 e2) = App (intermediate2surface e1) (intermediate2surface e2) ""
+intermediate2surface (IOp op e) = Op op (intermediate2surface e) ""
+intermediate2surface (AnnLam v e) = AnnLam v (intermediate2surface e)
+intermediate2surface e = e
 
 valToExp :: Value -> Exp
 valToExp (VN x) = (N x)
 valToExp (VB x) = (B x)
-valToExp (VLam _ e) = e
+valToExp (VLam _ e) = intermediate2surface e
 valToExp (VCast l e t1 t2) = Cast (valToExp e) l t2
-valToExp _ = undefined
