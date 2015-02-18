@@ -19,9 +19,9 @@ lookupVal :: (MonadReader Env m, MonadError EvErr m) => Name -> m Value
 lookupVal v = asks env >>= \env -> maybe (throwError (EvUndefinedVar v)) return (Map.lookup v env)
 
 
--- | Extend the context with a new binding.
-extendEnv :: (MonadReader Env m) => (Name, Value) -> m a -> m a
-extendEnv (x,v) = local (\ m@(Env {env = en}) -> trace ("\n\nextendingggggggg: " ++ (show $ Map.insert x v en)) m { env = Map.insert x v en })
+-- | Extend the environment with a new binding.
+extendEnv :: (MonadReader Env m) => (Name, Value) -> Env -> m a -> m a
+extendEnv (x,v) m = local (\_ -> case m of (Env {env = en}) -> m { env = Map.insert x v en })
 
 
 -- | Defines shallow consistency relation that we use to determine whether to report cast error.
@@ -45,7 +45,7 @@ applyCastLD l v t1 t2 = if shallowConsistentQ t1 t2
                         then
                           case t1 of
                           Dyn -> case v of
-                            (VCast l2 v2 t3 Dyn) -> applyCastLD l v t3 t2
+                            (VCast l2 v2 t3 Dyn) -> applyCastLD l v2 t3 t2
                             _ -> mkCast l v t1 t2
                           _ -> mkCast l v t1 t2
                         else
@@ -76,7 +76,6 @@ substVal v _ _ = v
 -- | Performs function application.
 applyLazy :: Value -> Value -> EvMonad Value
 applyLazy (VCast l v (Fun t1 t2) (Fun t3 t4)) v2 = applyLazy v (applyCastLD l v2 t3 t1) >>= \x -> return $ applyCastLD l x t2 t4
-applyLazy (VCast l v (Fun t1 t2) Dyn) v2 = applyLazy v v2
 applyLazy (VLam f (AnnLam (x,_) e)) v = f v >>= \y -> return $ substVal y x v
 applyLazy _ _ = throwError EvCallNonFunctionNonCast
 
@@ -91,9 +90,10 @@ interp appcast applazy (IOp ZeroQ e) = interp appcast applazy e >>= \(VN v) -> r
 interp appcast applazy (IIf e1 e2 e3) = interp appcast applazy e1 >>= \(VB v) -> if v then interp appcast applazy e2 else interp appcast applazy e3
 interp _ _ (Var v) = lookupVal v
 interp appcast applazy (IApp e1 e2) = interp appcast applazy e1 >>= \f -> interp appcast applazy e2 >>= \v -> applazy f v
-interp appcast applazy f@(AnnLam (x,_) e) = return $ VLam (\v -> extendEnv (x,v) (interp appcast applazy e)) f
+interp appcast applazy f@(AnnLam (x,_) e) = ask >>= \env -> return $ VLam (\v -> extendEnv (x,v) env (interp appcast applazy e)) f
 interp appcast applazy (ICast e l t1 t2) = (interp appcast applazy e) >>= \v -> return $ appcast l v t1 t2
 
+--  (IApp (IApp (AnnLam ("eu",Dyn) (AnnLam ("xg",IntTy) (Var "eu"))) (N (-1))) (N (-1)))
 
 -- | Interpreter for the intermediate language with lazy down casts
 interpLD :: Exp -> IO (Either EvErr Value)
