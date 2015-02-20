@@ -145,7 +145,7 @@ propTypePres e = monadicIO $ do et1 <- run $ runTypeCheck e
                                            case ve of
                                             Right v -> do et2 <- run $ runTypeCheck (valToExp v)
                                                           _ <- case et2 of
-                                                                Right (_,t2) -> assert $ t1 == t2
+                                                                Right (_,t2) -> assert $ isConsistent t1 t2
                                                                 Left _ -> fail "does not type check 1"
                                                           return ()
                                             Left _ -> fail "does not evaluate"
@@ -161,9 +161,9 @@ toTSResult GaveUp {} = TS.Fail "GaveUp"
 toTSResult Failure {reason} = TS.Fail reason
 
 
--- | Run a quick check property for 10000 problem instances each with small size
+-- | Run a quick check property for 1000 problem instances each with small size
 runQuickCheck :: Testable p => p -> IO TS.Progress
-runQuickCheck prop = quickCheckWithResult stdArgs {maxSuccess = 10000, maxSize = 3, chatty = True} prop >>= return . TS.Finished . toTSResult
+runQuickCheck prop = quickCheckWithResult stdArgs {maxSuccess = 1000, maxSize = 3, chatty = True} prop >>= return . TS.Finished . toTSResult
 
 
 -- | Run a bunch of tests

@@ -9,10 +9,6 @@ import qualified Data.Map as Map
 
 import GTLC.Syntax
 
--- debugging imports
-import Debug.Trace
-import GTLC.TypeChecker
-
 
 -- | Look for the value of a variable in the environment
 -- throwing an error if the name doesn't exist.

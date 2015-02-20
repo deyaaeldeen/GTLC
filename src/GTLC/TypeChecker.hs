@@ -1,7 +1,7 @@
 {-# LANGUAGE NamedFieldPuns, FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module GTLC.TypeChecker(runTypeCheck) where
+module GTLC.TypeChecker(runTypeCheck, isConsistent) where
 
 import Control.Monad.Error
 import Control.Monad.Reader
@@ -24,8 +24,8 @@ meet _ _ = Nothing
 
 
 -- | Checks if two types are consistent.
-consistentQ :: Type -> Type -> Bool
-consistentQ t1 t2 = maybe False (const True) (meet t1 t2)
+isConsistent :: Type -> Type -> Bool
+isConsistent t1 t2 = maybe False (const True) (meet t1 t2)
 
 
 -- | Computes the type of a constant or operator.
@@ -85,8 +85,8 @@ extendCtx (x,t) = local (\ m@(Gamma {ctx = cs}) -> m { ctx = Map.insert x t cs }
 typecheck :: Exp -> TcMonad (Exp,Type)
 typecheck e@(N _) = return (e, (typeof e))
 typecheck e@(B _) = return (e, (typeof e))
-typecheck e@(Op op e1 l) = typecheck e1 >>= \ (e2, t) -> let (Fun t1 t2) = typeof e in if (consistentQ t t1) then return ((IOp op (mkCast l e2 t t1)), t2) else throwError (PrimitiveOperator op t)
-typecheck (If e e1 e2 l) = typecheck e >>= \ (te, t1) -> typecheck e1 >>= \ (te1, t2) -> typecheck e2 >>= \ (te2, t3) -> if (consistentQ t1 BoolTy) && (consistentQ t2 t3) then
+typecheck e@(Op op e1 l) = typecheck e1 >>= \ (e2, t) -> let (Fun t1 t2) = typeof e in if (isConsistent t t1) then return ((IOp op (mkCast l e2 t t1)), t2) else throwError (PrimitiveOperator op t)
+typecheck (If e e1 e2 l) = typecheck e >>= \ (te, t1) -> typecheck e1 >>= \ (te1, t2) -> typecheck e2 >>= \ (te2, t3) -> if (isConsistent t1 BoolTy) && (isConsistent t2 t3) then
     case (meet t2 t3) of
      Just if_T -> return ((IIf (mkCast l te t1 BoolTy) (mkCast l te1 t2 if_T) (mkCast l te2 t3 if_T)), if_T)
      Nothing -> throwError (IllTypedIfExp "The two arms of the If expression do not have consistent types")
@@ -95,10 +95,10 @@ typecheck (If e e1 e2 l) = typecheck e >>= \ (te, t1) -> typecheck e1 >>= \ (te1
 typecheck e@(Var x) = lookupTy x >>= \t -> return (e,t)
 typecheck (Lam x e) = typecheck (AnnLam (x,Dyn) e)
 typecheck (AnnLam v@(_,t) e) = extendCtx v (typecheck e) >>= \ (e1,t1) -> return ((AnnLam v e1),(Fun t t1))
-typecheck (Cast e l t) = (typecheck e) >>= \ (e2,t2) -> if (consistentQ t2 t) then return ((mkCast l e2 t2 t),t) else throwError (CastBetweenInconsistentTypes t2 t)
+typecheck (Cast e l t) = (typecheck e) >>= \ (e2,t2) -> if (isConsistent t2 t) then return ((mkCast l e2 t2 t),t) else throwError (CastBetweenInconsistentTypes t2 t)
 typecheck (App e1 e2 l) = typecheck e2 >>= \ (e4,t) -> (typecheck e1) >>= \ g -> case g of
                                                                                   (e3, Dyn) -> return ((IApp (mkCast l e3 Dyn (Fun t Dyn)) e4),Dyn)
-                                                                                  (e3, (Fun t21 t22)) -> if (consistentQ t t21) then return ((IApp e3 (mkCast l e4 t t21)), t22) else throwError (ArgParamMismatch t21 t)
+                                                                                  (e3, (Fun t21 t22)) -> if (isConsistent t t21) then return ((IApp e3 (mkCast l e4 t t21)), t22) else throwError (ArgParamMismatch t21 t)
                                                                                   _ -> throwError CallNonFunction
 typecheck _ = throwError (UnknownTyError "Unknown Error!")
 
