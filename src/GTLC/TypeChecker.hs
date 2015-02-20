@@ -66,7 +66,7 @@ instance Show TyErr where
   show (IllTypedIfExp s) = s
   show (ArgParamMismatch t1 t2) = "The argument to the function has type " ++ show t2 ++ " that is not consistent with the type of the function parameter " ++ show t1
   show CallNonFunction = "The expression in the function position is not of Function type"
-  show (UndefinedVar v) = "The variable " ++ show v ++ " is not bounded"
+  show (UndefinedVar v) = "The variable " ++ show v ++ " is not bound"
   show (CastBetweenInconsistentTypes t1 t2) = "You can not cast between " ++ show t1 ++ " and " ++ show t2 ++ " because they are inconsistent"
   show (UnknownTyError s) = s
 

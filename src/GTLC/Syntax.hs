@@ -2,7 +2,6 @@
 
 module GTLC.Syntax where
 
-import Text.Show.Functions
 import Control.Monad.Error
 import Control.Monad.Reader
 import qualified Data.Map as Map
@@ -10,7 +9,7 @@ import qualified Data.Map as Map
 
 type EvMonad = ReaderT Env (ErrorT EvErr IO)
 
-data Env = Env { env :: Map.Map Name Value }
+data Env = Env { env :: Map.Map Name Value} deriving Show
 
 
 data EvErr =
@@ -52,7 +51,7 @@ data Exp =
 data Value =
   VN Int
   | VB Bool
-  | VLam (Value -> EvMonad Value) Exp -- closure and syntactic representation
+  | Closure (Name,Type) Exp Env
   | VCast BlameLabel Value Type Type
   | VBlame BlameLabel
   deriving (Show)
@@ -77,16 +76,26 @@ type BlameLabel = String
 type Name = String
 
 
-intermediate2surface :: Exp -> Exp
-intermediate2surface (IIf e1 e2 e3) = (If (intermediate2surface e1) (intermediate2surface e2) (intermediate2surface e3) "")
-intermediate2surface (ICast e l t1 t2) = intermediate2surface e
-intermediate2surface (IApp e1 e2) = App (intermediate2surface e1) (intermediate2surface e2) ""
-intermediate2surface (IOp op e) = Op op (intermediate2surface e) ""
-intermediate2surface (AnnLam v e) = AnnLam v (intermediate2surface e)
-intermediate2surface e = e
-
+-- | Translates values to expressions.
 valToExp :: Value -> Exp
 valToExp (VN x) = (N x)
 valToExp (VB x) = (B x)
-valToExp (VLam _ e) = intermediate2surface e
+valToExp (Closure p@(x,t) e envx) = AnnLam p $ substExp e envx
 valToExp (VCast l e t1 t2) = Cast (valToExp e) l t2
+
+
+-- | Substitutes variables with values in the environment and translates from the intermediate language to the surface language.
+substExp :: Exp -> Env -> Exp
+substExp (Op op e l) envx = Op op (substExp e envx) l
+substExp (If e1 e2 e3 l) envx = If (substExp e1 envx) (substExp e2 envx) (substExp e3 envx) l
+substExp (App e1 e2 l) envx = App (substExp e1 envx) (substExp e2 envx) l
+substExp (Cast e l t) envx = Cast (substExp e envx) l t
+substExp (IOp op e) envx = Op op (substExp e envx) ""
+substExp (IIf e1 e2 e3) envx = If (substExp e1 envx) (substExp e2 envx) (substExp e3 envx) ""
+substExp v@(Var x) (Env envx) = case Map.lookup x envx of
+                          Just e -> valToExp e
+                          Nothing -> v
+substExp (IApp e1 e2) envx = App (substExp e1 envx) (substExp e2 envx) ""
+substExp (AnnLam x e) envx = AnnLam x (substExp e envx)
+substExp (ICast e _ _ _) envx = substExp e envx
+substExp e _ = e
