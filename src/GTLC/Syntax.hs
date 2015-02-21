@@ -52,7 +52,7 @@ data Value =
   VN Int
   | VB Bool
   | Closure (Name,Type) Exp Env
-  | VCast BlameLabel Value Type Type
+  | VCast Value BlameLabel Type Type
   | VBlame BlameLabel
   deriving (Show)
 
@@ -81,7 +81,7 @@ valToExp :: Value -> Exp
 valToExp (VN x) = (N x)
 valToExp (VB x) = (B x)
 valToExp (Closure p@(x,t) e envx) = AnnLam p $ substExp e envx
-valToExp (VCast l e t1 t2) = Cast (valToExp e) l t2
+valToExp (VCast e l t1 t2) = Cast (valToExp e) l t2
 
 
 -- | Substitutes variables with values in the environment and translates from the intermediate language to the surface language.
@@ -92,9 +92,7 @@ substExp (App e1 e2 l) envx = App (substExp e1 envx) (substExp e2 envx) l
 substExp (Cast e l t) envx = Cast (substExp e envx) l t
 substExp (IOp op e) envx = Op op (substExp e envx) ""
 substExp (IIf e1 e2 e3) envx = If (substExp e1 envx) (substExp e2 envx) (substExp e3 envx) ""
-substExp v@(Var x) (Env envx) = case Map.lookup x envx of
-                          Just e -> valToExp e
-                          Nothing -> v
+substExp v@(Var x) (Env envx) = maybe v valToExp (Map.lookup x envx)
 substExp (IApp e1 e2) envx = App (substExp e1 envx) (substExp e2 envx) ""
 substExp (AnnLam x e) envx = AnnLam x (substExp e envx)
 substExp (ICast e _ _ _) envx = substExp e envx

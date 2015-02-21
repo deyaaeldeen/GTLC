@@ -22,40 +22,36 @@ extendEnv (x,v) m@(Env {env = en}) = local (\_ -> m { env = Map.insert x v en })
 
 
 -- | Defines shallow consistency relation that we use to determine whether to report cast error.
-shallowConsistentQ :: Type -> Type -> Bool
-shallowConsistentQ Dyn t = True
-shallowConsistentQ t Dyn = True
-shallowConsistentQ BoolTy BoolTy = True
-shallowConsistentQ IntTy IntTy = True
-shallowConsistentQ (Fun _ _) (Fun _ _) = True
-shallowConsistentQ _ _ = False
+isShallowConsistent :: Type -> Type -> Bool
+isShallowConsistent Dyn t = True
+isShallowConsistent t Dyn = True
+isShallowConsistent BoolTy BoolTy = True
+isShallowConsistent IntTy IntTy = True
+isShallowConsistent (Fun _ _) (Fun _ _) = True
+isShallowConsistent _ _ = False
 
 
 -- | Wraps a run-time cast around a value if the two types are different.
 mkCast :: BlameLabel -> Value -> Type -> Type -> Value
-mkCast l v t1 t2 = if t1 == t2 then v else (VCast l v t1 t2)
+mkCast l v t1 t2 = if t1 == t2 then v else (VCast v l t1 t2)
 
 
 -- | Performs run-time cast on a value using downcast approach.
 applyCastLD :: BlameLabel -> Value -> Type -> Type -> Value
-applyCastLD l v t1 t2 = if shallowConsistentQ t1 t2
-                        then
-                          case t1 of
-                          Dyn -> case v of
-                            (VCast l2 v2 t3 Dyn) -> applyCastLD l v2 t3 t2
-                            _ -> mkCast l v t1 t2
-                          _ -> mkCast l v t1 t2
-                        else
-                          VBlame l
+applyCastLD l v t1 t2 = case t1 of
+                         Dyn -> case v of
+                                 (VCast v2 l2 t3 Dyn) -> if isShallowConsistent t1 t2 then applyCastLD l v2 t3 t2 else VBlame l
+                                 _ -> mkCast l v t1 t2
+                         _ -> mkCast l v t1 t2
 
 
 -- | Performs function application.
 applyLazy :: Value -> Value -> EvMonad Value
-applyLazy (VCast l v (Fun t1 t2) (Fun t3 t4)) v2 = applyLazy v (applyCastLD l v2 t3 t1) >>= \x -> return $ applyCastLD l x t2 t4
+applyLazy (VCast v l (Fun t1 t2) (Fun t3 t4)) v2 = applyLazy v (applyCastLD l v2 t3 t1) >>= \x -> return $ applyCastLD l x t2 t4
 applyLazy (Closure (x,_) e env) v = extendEnv (x,v) env (interp applyCastLD applyLazy e)
 applyLazy _ _ = throwError EvCallNonFunctionNonCast
 
--- The problem is I substitute at different places, so one solution is to keep track of all bound variables and substitute them at the end
+
 -- | Interprets the intermediate language.
 -- Not defined on the surface language
 interp :: (BlameLabel -> Value -> Type -> Type -> Value) -> (Value -> Value -> EvMonad Value) -> Exp -> EvMonad Value
