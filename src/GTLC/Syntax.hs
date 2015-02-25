@@ -41,11 +41,17 @@ data Exp =
   | Lam Name Exp
   | AnnLam (Name,Type) Exp
   | Cast Exp BlameLabel Type
+  | GRef Exp
+  | GDeRef Exp
+  | GAssign Exp Exp
     --Intermediate language
   | IOp Operator Exp
   | ICast Exp BlameLabel Type Type
   | IApp Exp Exp
   | IIf Exp Exp Exp
+  | IGRef Exp
+  | IGDeRef Exp
+  | IGAssign Exp Exp
   deriving (Show,Eq,Read)
 
 data Value =
@@ -54,6 +60,7 @@ data Value =
   | Closure (Name,Type) Exp Env
   | VCast Value BlameLabel Type Type
   | VBlame BlameLabel
+  | VAddr Int
   deriving (Show)
 
 data Type =
@@ -61,6 +68,7 @@ data Type =
   | IntTy
   | BoolTy
   | Fun Type Type
+  | GRefTy Type
   deriving (Show,Eq,Read)
 
 data Coercion = 
@@ -70,6 +78,7 @@ data Coercion =
   | FunC Coercion Coercion
   | SeqC Coercion Coercion
   | FailC BlameLabel Type Type
+  | CGRef Coercion Coercion
 
 
 type BlameLabel = String

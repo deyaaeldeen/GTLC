@@ -8,6 +8,7 @@ import Control.Monad.Reader
 import qualified Data.Map as Map
 
 import GTLC.Syntax
+import GTLC.TypeChecker
 
 
 -- | Look for the value of a variable in the environment
@@ -89,7 +90,7 @@ interpLD e = runErrorT $ runReaderT (interp applyCastLD (applyLazy applyCastLD) 
 
 -- | Interpreter for the intermediate language with lazy up down casts.
 interpLUD :: Exp -> IO (Either EvErr Value)
-interpLUD e = runErrorT $ runReaderT (interp applyCastLD (applyLazy applyCastLUD) e) (Env {env = Map.empty})
+interpLUD e = runErrorT $ runReaderT (interp applyCastLUD (applyLazy applyCastLUD) e) (Env {env = Map.empty})
 
 
 -- | Returns the corresponding source and target type of a coercion.
@@ -102,8 +103,10 @@ typeofCoercion (SeqC (typeofCoercion -> (t1,t2)) (typeofCoercion -> (t3,t4))) | 
 typeofCoercion (FailC _ t1 t2) = (t1,t2)
 
 
+type CoerceT = Type -> Type -> BlameLabel -> Coercion
+
 -- | Translates casts to coercions in the lazy downcast approach.
-mkCoerceLD :: Type -> Type -> BlameLabel -> Coercion
+mkCoerceLD :: CoerceT
 mkCoerceLD Dyn Dyn _ = IdC Dyn
 mkCoerceLD BoolTy BoolTy _ = IdC BoolTy
 mkCoerceLD IntTy IntTy _ = IdC IntTy
@@ -114,7 +117,7 @@ mkCoerceLD t1 t2 l = FailC l t1 t2
 
 
 -- | Translates casts to coercions in the lazy up down cast approach.
-mkCoerceLUD :: Type -> Type -> BlameLabel -> Coercion
+mkCoerceLUD :: CoerceT
 mkCoerceLUD Dyn Dyn _ = IdC Dyn
 mkCoerceLUD BoolTy BoolTy _ = IdC BoolTy
 mkCoerceLUD IntTy IntTy _ = IdC IntTy
@@ -126,3 +129,18 @@ mkCoerceLUD BoolTy Dyn _ = InjC BoolTy
 mkCoerceLUD (Fun t1 t2) Dyn l = SeqC (FunC (mkCoerceLUD Dyn t1 l) (mkCoerceLUD t2 Dyn l)) (InjC (Fun Dyn Dyn))
 mkCoerceLUD (Fun t1 t2) (Fun t3 t4) l = FunC (mkCoerceLUD t3 t1 l) (mkCoerceLUD t2 t4 l)
 mkCoerceLUD t1 t2 l = FailC l t1 t2
+
+
+-- | Composes coercion in lazy fashion.
+seqL :: CoerceT -> Coercion -> Coercion -> Coercion
+seqL _ (IdC _) c = c
+seqL _ c (IdC _) = c
+seqL c (InjC t1) (ProjC t2 l) = c t1 t2 l
+seqL c (FunC c11 c12) (FunC c21 c22) = FunC (seqL c c21 c11) (seqL c c12 c22)
+seqL c f@(FailC l t1 t2) _ = f
+seqL c (InjC _) f@(FailC l t1 t2) = f
+seqL c (FunC _ _) f@(FailC l t1 t2) = f
+seqL c (SeqC c1 c2) c3 = seqL c c1 $ seqL c c2 c3
+seqL c a@(ProjC t l) b@(SeqC (FunC c1 c2) c3) = SeqC a b
+seqL c c1 (SeqC c2 c3) = seqL c (seqL c c1 c2) c3
+seqL _ c1 c2 = SeqC c1 c2

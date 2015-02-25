@@ -16,7 +16,9 @@ meet Dyn t = Just t
 meet IntTy t@IntTy = Just t
 meet BoolTy t@BoolTy = Just t
 meet (Fun t11 t12) (Fun t21 t22) = maybe Nothing (\t1 -> maybe Nothing (Just . (Fun t1)) (meet t12 t22)) (meet t11 t21)
+meet (GRefTy t1) (GRefTy t2) = maybe Nothing (Just . GRefTy) $ meet t1 t2
 meet _ _ = Nothing
+
 
 -- | Checks if two types are consistent.
 isConsistent :: Type -> Type -> Bool
@@ -47,6 +49,9 @@ data TyErr =
   | ArgParamMismatch Type Type
   | CallNonFunction
   | UndefinedVar Name
+  | BadDereference Type
+  | BadAssignment Type
+  | IllTypedAssignment Type Type
   -- Cast Errors
   | CastBetweenInconsistentTypes Type Type
   -- Unknown
@@ -64,6 +69,9 @@ instance Show TyErr where
   show (UndefinedVar v) = "The variable " ++ show v ++ " is not bound"
   show (CastBetweenInconsistentTypes t1 t2) = "You can not cast between " ++ show t1 ++ " and " ++ show t2 ++ " because they are inconsistent"
   show (UnknownTyError s) = s
+  show (BadDereference t) = "Trying to dereference an expression of type " ++ show t ++ " which is not a reference type"
+  show (BadAssignment t) = "Trying to assign an expression to another of type " ++ show t ++ " which is not a reference type"
+  show (IllTypedAssignment t1 t2) = "Trying to assign an expression of type "  ++ show t2 ++ " to a reference of type " ++ show t1 ++ " and they are not consistent"
 
 type TcMonad = ReaderT Gamma (ErrorT TyErr IO)
 
@@ -95,6 +103,15 @@ typecheck (App e1 e2 l) = typecheck e2 >>= \(e4,t) -> typecheck e1 >>= \g -> cas
                                                                               (e3, Dyn) -> return ((IApp (mkCast l e3 Dyn (Fun t Dyn)) e4),Dyn)
                                                                               (e3, (Fun t21 t22)) -> if isConsistent t t21 then return (IApp e3 $ mkCast l e4 t t21, t22) else throwError $ ArgParamMismatch t21 t
                                                                               _ -> throwError CallNonFunction
+typecheck (GRef e)  = typecheck e >>= \(e',t) -> return (IGRef e', GRefTy t)
+typecheck (GDeRef e) = typecheck e >>= \(e',t) -> case t of
+                                                   GRefTy t' -> return (IGDeRef e', t')
+                                                   Dyn -> return (IGDeRef e', Dyn)
+                                                   t' -> throwError $ BadDereference t'
+typecheck (GAssign e1 e2) = typecheck e1 >>= \(e1',t1) -> case t1 of
+                                                            (GRefTy t') -> typecheck e2 >>= \(e2',t2) -> if isConsistent t' t2 then return (GAssign e1' e2', t2) else throwError $ IllTypedAssignment t' t2
+                                                            Dyn -> typecheck e2 >>= \(e2',_) -> return (GAssign e1' e2', Dyn)
+                                                            t' -> throwError $ BadAssignment t'
 typecheck _ = throwError $ UnknownTyError "Unknown Error!"
 
 
