@@ -42,8 +42,8 @@ data Exp =
   | AnnLam (Name,Type) Exp
   | Cast Exp BlameLabel Type
   | GRef Exp
-  | GDeRef Exp
-  | GAssign Exp Exp
+  | GDeRef Exp BlameLabel
+  | GAssign Exp Exp BlameLabel
     --Intermediate language
   | IOp Operator Exp
   | ICast Exp BlameLabel Type Type

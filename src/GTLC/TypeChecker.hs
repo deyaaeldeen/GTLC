@@ -104,13 +104,13 @@ typecheck (App e1 e2 l) = typecheck e2 >>= \(e4,t) -> typecheck e1 >>= \g -> cas
                                                                               (e3, (Fun t21 t22)) -> if isConsistent t t21 then return (IApp e3 $ mkCast l e4 t t21, t22) else throwError $ ArgParamMismatch t21 t
                                                                               _ -> throwError CallNonFunction
 typecheck (GRef e)  = typecheck e >>= \(e',t) -> return (IGRef e', GRefTy t)
-typecheck (GDeRef e) = typecheck e >>= \(e',t) -> case t of
+typecheck (GDeRef e l) = typecheck e >>= \(e',t) -> case t of
                                                    GRefTy t' -> return (IGDeRef e', t')
-                                                   Dyn -> return (IGDeRef e', Dyn)
+                                                   Dyn -> return (IGDeRef $ mkCast l e' Dyn (GRefTy Dyn), Dyn)
                                                    t' -> throwError $ BadDereference t'
-typecheck (GAssign e1 e2) = typecheck e1 >>= \(e1',t1) -> case t1 of
-                                                            (GRefTy t') -> typecheck e2 >>= \(e2',t2) -> if isConsistent t' t2 then return (GAssign e1' e2', t2) else throwError $ IllTypedAssignment t' t2
-                                                            Dyn -> typecheck e2 >>= \(e2',_) -> return (GAssign e1' e2', Dyn)
+typecheck (GAssign e1 e2 l) = typecheck e1 >>= \(e1',t1) -> case t1 of
+                                                            (GRefTy t') -> typecheck e2 >>= \(e2',t2) -> if isConsistent t' t2 then return (IGAssign e1' $ mkCast l e2' t2 t', t2) else throwError $ IllTypedAssignment t' t2
+                                                            Dyn -> typecheck e2 >>= \(e2',t2) -> return (IGAssign (mkCast l e1' Dyn (GRefTy Dyn)) $ mkCast l e2' t2 Dyn, Dyn)
                                                             t' -> throwError $ BadAssignment t'
 typecheck _ = throwError $ UnknownTyError "Unknown Error!"
 
