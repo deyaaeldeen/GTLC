@@ -1,7 +1,7 @@
-{-# LANGUAGE NamedFieldPuns, FlexibleContexts #-}
+{-# LANGUAGE NamedFieldPuns, FlexibleContexts, ViewPatterns #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
 
-module GTLC.Eval(interpLD) where
+module GTLC.Eval(interpLD, interpLUD) where
 
 import Control.Monad.Error
 import Control.Monad.Reader
@@ -33,50 +33,96 @@ isShallowConsistent _ _ = False
 
 -- | Wraps a run-time cast around a value if the two types are different.
 mkCast :: BlameLabel -> Value -> Type -> Type -> Value
-mkCast l v t1 t2 = if t1 == t2 then v else (VCast v l t1 t2)
+mkCast l v t1 t2 | t1 == t2 = v | otherwise = VCast v l t1 t2
 
 
--- | Performs run-time cast on a value using downcast approach.
-applyCastLD :: BlameLabel -> Value -> Type -> Type -> Value
-applyCastLD l v t1 t2 = case t1 of
-                         Dyn -> case v of
-                                 (VCast v2 l2 t3 Dyn) -> if isShallowConsistent t1 t2 then applyCastLD l v2 t3 t2 else VBlame l
-                                 _ -> mkCast l v t1 t2
-                         _ -> mkCast l v t1 t2
+type CastT = BlameLabel -> Value -> Type -> Type -> Value
+type AppT = Value -> Value -> EvMonad Value
+
+
+-- | Performs run-time cast on a value in the downcast approach.
+applyCastLD :: CastT
+applyCastLD l v t1 t2 = if isShallowConsistent t1 t2 then
+                          case (t1,v) of
+                           (Dyn, VCast v2 l2 t3 Dyn) -> applyCastLD l v2 t3 t2
+                           _ -> mkCast l v t1 t2
+                        else VBlame l
+
+
+-- | Performs run-time cast on a value in the downcast approach.
+applyCastLUD :: CastT
+applyCastLUD l v t1 t2 = if isShallowConsistent t1 t2 then
+                           case (t1,t2,v) of
+                            (Dyn, t, VCast v2 l2 t3 Dyn) -> applyCastLD l v2 t3 t2
+                            (Fun Dyn Dyn, Dyn, _) -> VCast v l (Fun Dyn Dyn) Dyn
+                            (Fun t11 t12, Dyn, _) -> VCast (VCast v l (Fun t11 t12) (Fun Dyn Dyn)) l (Fun Dyn Dyn) Dyn
+                            _ -> mkCast l v t1 t2
+                         else VBlame l
 
 
 -- | Performs function application.
-applyLazy :: Value -> Value -> EvMonad Value
-applyLazy (VCast v l (Fun t1 t2) (Fun t3 t4)) v2 = applyLazy v (applyCastLD l v2 t3 t1) >>= \x -> return $ applyCastLD l x t2 t4
-applyLazy (Closure (x,_) e env) v = extendEnv (x,v) env (interp applyCastLD applyLazy e)
-applyLazy _ _ = throwError EvCallNonFunctionNonCast
+applyLazy :: CastT -> AppT
+applyLazy cast (VCast v l (Fun t1 t2) (Fun t3 t4)) v2 = applyLazy cast v (cast l v2 t3 t1) >>= \x -> return $ cast l x t2 t4
+applyLazy cast (Closure (x,_) e env) v = extendEnv (x,v) env (interp cast (applyLazy cast) e)
+applyLazy _ _ _ = throwError EvCallNonFunctionNonCast
 
 
 -- | Interprets the intermediate language.
 -- Not defined on the surface language
-interp :: (BlameLabel -> Value -> Type -> Type -> Value) -> (Value -> Value -> EvMonad Value) -> Exp -> EvMonad Value
+interp :: CastT -> AppT -> Exp -> EvMonad Value
 interp _ _ (N x) = return (VN x)
 interp _ _ (B x) = return (VB x)
-interp appcast applazy (IOp Inc e) = interp appcast applazy e >>= \(VN v) -> return $ VN(v+1)
-interp appcast applazy (IOp Dec e) = interp appcast applazy e >>= \(VN v) -> return $ VN(v-1)
-interp appcast applazy (IOp ZeroQ e) = interp appcast applazy e >>= \(VN v) -> return $ VB(v == 0)
-interp appcast applazy (IIf e1 e2 e3) = interp appcast applazy e1 >>= \(VB v) -> if v then interp appcast applazy e2 else interp appcast applazy e3
+interp cast app (IOp Inc e) = interp cast app e >>= \(VN v) -> return $ VN(v+1)
+interp cast app (IOp Dec e) = interp cast app e >>= \(VN v) -> return $ VN(v-1)
+interp cast app (IOp ZeroQ e) = interp cast app e >>= \(VN v) -> return $ VB(v == 0)
+interp cast app (IIf e1 e2 e3) = interp cast app e1 >>= \(VB v) -> if v then interp cast app e2 else interp cast app e3
 interp _ _ (Var v) = lookupVal v
-interp appcast applazy (IApp e1 e2) = interp appcast applazy e1 >>= \f -> interp appcast applazy e2 >>= applazy f
-interp appcast applazy (AnnLam x e) = ask >>= return . (Closure x e)
-interp appcast applazy (ICast e l t1 t2) = (interp appcast applazy e) >>= \v -> return $ appcast l v t1 t2
+interp cast app (IApp e1 e2) = interp cast app e1 >>= \f -> interp cast app e2 >>= app f
+interp cast app (AnnLam x e) = ask >>= return . (Closure x e)
+interp cast app (ICast e l t1 t2) = (interp cast app e) >>= \v -> return $ cast l v t1 t2
 
 
--- | Interpreter for the intermediate language with lazy down casts
+-- | Interpreter for the intermediate language with lazy down casts.
 interpLD :: Exp -> IO (Either EvErr Value)
-interpLD e = runErrorT $ runReaderT (interp applyCastLD applyLazy e) (Env {env = Map.empty})
+interpLD e = runErrorT $ runReaderT (interp applyCastLD (applyLazy applyCastLD) e) (Env {env = Map.empty})
 
 
--- | Turns the evaluation result to an observable.
-observeLazy :: Value -> Observable
-observeLazy (VN x) = (ON x)
-observeLazy (VB x) = (OB x)
-observeLazy (Closure _ _ _) = Function
-observeLazy (VCast _ _ _ (Fun _ _)) = Function
-observeLazy (VCast _ _ _ Dyn) = Dynamic
-observeLazy (VBlame l) = (OBlame l)
+-- | Interpreter for the intermediate language with lazy up down casts.
+interpLUD :: Exp -> IO (Either EvErr Value)
+interpLUD e = runErrorT $ runReaderT (interp applyCastLD (applyLazy applyCastLUD) e) (Env {env = Map.empty})
+
+
+-- | Returns the corresponding source and target type of a coercion.
+typeofCoercion :: Coercion -> (Type, Type)
+typeofCoercion (IdC t) = (t,t)
+typeofCoercion (InjC t) = (t, Dyn)
+typeofCoercion (ProjC t _) = (Dyn, t)
+typeofCoercion (FunC (typeofCoercion -> (t21,t11)) (typeofCoercion -> (t12,t22))) = (Fun t11 t12, Fun t21 t22)
+typeofCoercion (SeqC (typeofCoercion -> (t1,t2)) (typeofCoercion -> (t3,t4))) | t2 == t3 = (t1,t3)
+typeofCoercion (FailC _ t1 t2) = (t1,t2)
+
+
+-- | Translates casts to coercions in the lazy downcast approach.
+mkCoerceLD :: Type -> Type -> BlameLabel -> Coercion
+mkCoerceLD Dyn Dyn _ = IdC Dyn
+mkCoerceLD BoolTy BoolTy _ = IdC BoolTy
+mkCoerceLD IntTy IntTy _ = IdC IntTy
+mkCoerceLD Dyn t l = ProjC t l
+mkCoerceLD t Dyn _ = InjC t
+mkCoerceLD (Fun t1 t2) (Fun t3 t4) l = FunC (mkCoerceLD t3 t1 l) (mkCoerceLD t2 t4 l)
+mkCoerceLD t1 t2 l = FailC l t1 t2
+
+
+-- | Translates casts to coercions in the lazy up down cast approach.
+mkCoerceLUD :: Type -> Type -> BlameLabel -> Coercion
+mkCoerceLUD Dyn Dyn _ = IdC Dyn
+mkCoerceLUD BoolTy BoolTy _ = IdC BoolTy
+mkCoerceLUD IntTy IntTy _ = IdC IntTy
+mkCoerceLUD Dyn IntTy l = ProjC IntTy l
+mkCoerceLUD Dyn BoolTy l = ProjC BoolTy l
+mkCoerceLUD Dyn (Fun t1 t2) l = SeqC (ProjC (Fun Dyn Dyn) l) (FunC (mkCoerceLUD t1 Dyn l) (mkCoerceLUD Dyn t2 l))
+mkCoerceLUD IntTy Dyn _ = InjC IntTy
+mkCoerceLUD BoolTy Dyn _ = InjC BoolTy
+mkCoerceLUD (Fun t1 t2) Dyn l = SeqC (FunC (mkCoerceLUD Dyn t1 l) (mkCoerceLUD t2 Dyn l)) (InjC (Fun Dyn Dyn))
+mkCoerceLUD (Fun t1 t2) (Fun t3 t4) l = FunC (mkCoerceLUD t3 t1 l) (mkCoerceLUD t2 t4 l)
+mkCoerceLUD t1 t2 l = FailC l t1 t2

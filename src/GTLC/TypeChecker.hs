@@ -34,7 +34,7 @@ typeof (Op ZeroQ _ _) = Fun IntTy BoolTy
 
 -- | Wraps a run-time cast around the expression if the two types are different.
 mkCast :: BlameLabel -> Exp -> Type -> Type -> Exp
-mkCast l e t1 t2 = if t1 == t2 then e else ICast e l t1 t2
+mkCast l e t1 t2 | t1 == t2 = e | otherwise = ICast e l t1 t2
 
 -- | Modeling the environment and the error monads
 

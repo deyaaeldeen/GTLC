@@ -63,13 +63,14 @@ data Type =
   | Fun Type Type
   deriving (Show,Eq,Read)
 
-data Observable =
-  ON Int
-  | OB Bool
-  | Function
-  | Dynamic
-  | OBlame String
-  deriving (Show,Eq)
+data Coercion = 
+  IdC Type
+  | InjC Type
+  | ProjC Type BlameLabel
+  | FunC Coercion Coercion
+  | SeqC Coercion Coercion
+  | FailC BlameLabel Type Type
+
 
 type BlameLabel = String
 

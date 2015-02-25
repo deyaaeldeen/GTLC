@@ -137,20 +137,37 @@ genExpAnnLam t1 t2 = ask >>= \g@(Gamma{size = s}) -> lift $ genName >>= \x -> li
 instance Arbitrary Exp where
       arbitrary = sized $ \n -> runReaderT (genExp arbitrary) Gamma {ctx=[],size=n}
 
-propTypePres :: Exp -> Property
-propTypePres e = monadicIO $ do et1 <- run $ runTypeCheck e
-                                _ <- case et1 of
-                                      Right (ie,t1) ->
-                                        do ve <- run $ interpLD ie
-                                           case ve of
-                                            Right v -> do et2 <- run $ runTypeCheck (valToExp v)
-                                                          _ <- case et2 of
-                                                                Right (_,t2) -> assert $ isConsistent t1 t2
-                                                                Left _ -> fail "does not type check 1"
-                                                          return ()
-                                            Left _ -> fail "does not evaluate"
-                                      Left _ -> fail "does not type check 2"
-                                return ()
+propTypePresLD :: Exp -> Property
+propTypePresLD e = monadicIO $ do et1 <- run $ runTypeCheck e
+                                  _ <- case et1 of
+                                        Right (ie,t1) ->
+                                          do ve <- run $ interpLD ie
+                                             case ve of
+                                              Right v -> do et2 <- run $ runTypeCheck (valToExp v)
+                                                            _ <- case et2 of
+                                                                  Right (_,t2) -> assert $ isConsistent t1 t2
+                                                                  Left _ -> fail "does not type check 1"
+                                                            return ()
+                                              Left _ -> fail "does not evaluate"
+                                        Left _ -> fail "does not type check 2"
+                                  return ()
+
+
+propTypePresLUD :: Exp -> Property
+propTypePresLUD e = monadicIO $ do et1 <- run $ runTypeCheck e
+                                   _ <- case et1 of
+                                         Right (ie,t1) ->
+                                           do ve <- run $ interpLUD ie
+                                              case ve of
+                                               Right v -> do et2 <- run $ runTypeCheck (valToExp v)
+                                                             _ <- case et2 of
+                                                                   Right (_,t2) -> assert $ isConsistent t1 t2
+                                                                   Left _ -> fail "does not type check 1"
+                                                             return ()
+                                               Left _ -> fail "does not evaluate"
+                                         Left _ -> fail "does not type check 2"
+                                   return ()
+
 
 
 -- | Converts from QuickCheck result to Distribution.TestSuite result
@@ -163,12 +180,13 @@ toTSResult Failure {reason} = TS.Fail reason
 
 -- | Run a quick check property for 1000 problem instances each with small size
 runQuickCheck :: Testable p => p -> IO TS.Progress
-runQuickCheck prop = quickCheckWithResult stdArgs {maxSuccess = 1000, maxSize = 3, chatty = True} prop >>= return . TS.Finished . toTSResult
+runQuickCheck prop = quickCheckWithResult stdArgs {maxSuccess = 700, maxSize = 3, chatty = True} prop >>= return . TS.Finished . toTSResult
 
 
 -- | Run a bunch of tests
 tests :: IO [TS.Test]
-tests = return [TS.Test $ TS.TestInstance (runQuickCheck propTypePres) "Type Preservation" ["tag"] [] undefined]
+tests = return [TS.Test $ TS.TestInstance (runQuickCheck propTypePresLD) "Type Preservation LD" ["tag"] [] undefined,
+                TS.Test $ TS.TestInstance (runQuickCheck propTypePresLUD) "Type Preservation LUD" ["tag"] [] undefined]
 
 
 main :: IO [TS.Test]
