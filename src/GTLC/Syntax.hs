@@ -1,21 +1,27 @@
-{-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
+{-# OPTIONS_GHC -Wall -fno-warn-unused-matches -fwarn-incomplete-patterns #-}
 
 module GTLC.Syntax where
 
 import Control.Monad.Error
 import Control.Monad.Reader
-import qualified Data.Map as Map
+import Control.Monad.State
+import Data.HashMap.Lazy as H
+import qualified Data.Map as M
 
 
-type EvMonad = ReaderT Env (ErrorT EvErr IO)
+data Heap = Heap {heap :: H.HashMap Int Value, top :: Int} deriving Show
 
-data Env = Env { env :: Map.Map Name Value} deriving Show
+data Env = Env { env :: M.Map Name Value} deriving Show
+
+type EvMonad = StateT Heap (ReaderT Env (ErrorT EvErr IO))
 
 
 data EvErr =
   EvUnknownError String
   | EvUndefinedVar Name
   | EvCallNonFunctionNonCast
+  | EvBadReference
+  | EvBadLocation
   deriving (Eq)
 
 
@@ -27,6 +33,8 @@ instance Show EvErr where
   show (EvUndefinedVar v) = "The variable " ++ show v ++ " is not bound"
   show (EvUnknownError s) = s
   show EvCallNonFunctionNonCast = "The expression in the function position is neither a function nor a cast of one"
+  show EvBadReference = "The expression in the reference position is not a reference"
+  show EvBadLocation = "Trying to access unallocated memory location"
 
 data Operator = Inc | Dec | ZeroQ deriving (Show,Eq,Read)
 
@@ -102,7 +110,7 @@ substExp (App e1 e2 l) envx = App (substExp e1 envx) (substExp e2 envx) l
 substExp (Cast e l t) envx = Cast (substExp e envx) l t
 substExp (IOp op e) envx = Op op (substExp e envx) ""
 substExp (IIf e1 e2 e3) envx = If (substExp e1 envx) (substExp e2 envx) (substExp e3 envx) ""
-substExp v@(Var x) (Env envx) = maybe v valToExp (Map.lookup x envx)
+substExp v@(Var x) (Env envx) = maybe v valToExp (M.lookup x envx)
 substExp (IApp e1 e2) envx = App (substExp e1 envx) (substExp e2 envx) ""
 substExp (AnnLam x e) envx = AnnLam x (substExp e envx)
 substExp (ICast e _ _ _) envx = substExp e envx

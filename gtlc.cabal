@@ -22,7 +22,7 @@ cabal-version:       >=1.10
 executable gtlc
   main-is:             Main.hs
   other-extensions:    NamedFieldPuns, FlexibleContexts
-  build-depends:       base >=4.7 && <4.8, mtl >=2.1 && <2.2, containers >=0.5 && <0.6, QuickCheck >=2.7 && <2.8
+  build-depends:       base >=4.7 && <4.8, mtl >=2.1 && <2.2, containers >=0.5 && <0.6, QuickCheck >=2.7 && <2.8, unordered-containers >= 0.2.5.1
   hs-source-dirs:      src
   default-language:    Haskell2010
 
@@ -32,10 +32,10 @@ Source-repository head
 
 Library
   Hs-Source-Dirs: src
-  build-depends: base, mtl, containers
+  build-depends: base, mtl, containers, unordered-containers >= 0.2.5.1
   other-extensions:    NamedFieldPuns, FlexibleContexts
   ghc-options:
-    -fwarn-incomplete-patterns
+    -fwarn-incomplete-patterns -Wall
   Exposed-Modules:
     GTLC.TypeChecker
     GTLC.Eval
@@ -47,6 +47,8 @@ Test-Suite test
   Type: detailed-0.9
   test-module: Test
   other-extensions:    NamedFieldPuns, FlexibleContexts, TemplateHaskell
+  ghc-options:
+    -fwarn-incomplete-patterns -Wall
   Build-Depends:
     base >= 4 && < 5,
     mtl >= 1 && < 3,

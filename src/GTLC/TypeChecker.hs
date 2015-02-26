@@ -1,5 +1,5 @@
 {-# LANGUAGE NamedFieldPuns, FlexibleContexts #-}
-{-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
+{-# OPTIONS_GHC -Wall -fno-warn-unused-matches -fwarn-incomplete-patterns #-}
 
 module GTLC.TypeChecker(runTypeCheck, isConsistent) where
 
@@ -75,14 +75,17 @@ instance Show TyErr where
 
 type TcMonad = ReaderT Gamma (ErrorT TyErr IO)
 
+
 -- | Look for the type of a variable in the context
 -- throwing an error if the name doesn't exist.
 lookupTy :: (MonadReader Gamma m, MonadError TyErr m) => Name -> m Type
 lookupTy v = asks ctx >>= \ctx -> maybe (throwError $ UndefinedVar v) return (Map.lookup v ctx)
 
+
 -- | Extend the context with a new binding.
 extendCtx :: (MonadReader Gamma m) => (Name, Type) -> m a -> m a
 extendCtx (x,t) = local $ \m@(Gamma {ctx = cs}) -> m {ctx = Map.insert x t cs}
+
 
 -- | Type-check expression of the GTLC, converting it to one in intermediate language with explicit casts.
 typecheck :: Exp -> TcMonad (Exp,Type)
@@ -117,6 +120,7 @@ typecheck _ = throwError $ UnknownTyError "Unknown Error!"
 
 runTcMonad :: TcMonad a -> Gamma -> IO (Either TyErr a)
 runTcMonad m = runErrorT . (runReaderT m)
+
 
 runTypeCheck :: Exp -> IO (Either TyErr (Exp, Type))
 runTypeCheck e = runTcMonad (typecheck e) (Gamma {ctx = Map.empty})

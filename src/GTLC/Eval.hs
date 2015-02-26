@@ -1,11 +1,13 @@
 {-# LANGUAGE NamedFieldPuns, FlexibleContexts, ViewPatterns #-}
-{-# OPTIONS_GHC -Wall -fno-warn-unused-matches #-}
+{-# OPTIONS_GHC -Wall -fno-warn-unused-matches -fwarn-incomplete-patterns #-}
 
 module GTLC.Eval(interpLD, interpLUD) where
 
 import Control.Monad.Error
 import Control.Monad.Reader
-import qualified Data.Map as Map
+import Control.Monad.State
+import qualified Data.Map as M
+import Data.HashMap.Lazy as H
 
 import GTLC.Syntax
 import GTLC.TypeChecker
@@ -14,12 +16,12 @@ import GTLC.TypeChecker
 -- | Look for the value of a variable in the environment
 -- throwing an error if the name doesn't exist.
 lookupVal :: (MonadReader Env m, MonadError EvErr m) => Name -> m Value
-lookupVal v = asks env >>= \env -> maybe (throwError (EvUndefinedVar v)) return (Map.lookup v env)
+lookupVal v = asks env >>= \env -> maybe (throwError (EvUndefinedVar v)) return (M.lookup v env)
 
 
 -- | Extend the environment with a new binding.
 extendEnv :: (MonadReader Env m) => (Name, Value) -> Env -> m a -> m a
-extendEnv (x,v) m@(Env {env = en}) = local (\_ -> m { env = Map.insert x v en })
+extendEnv (x,v) m@(Env {env = en}) = local (\_ -> m { env = M.insert x v en })
 
 
 -- | Defines shallow consistency relation that we use to determine whether to report cast error.
@@ -54,7 +56,7 @@ applyCastLD l v t1 t2 = if isShallowConsistent t1 t2 then
 applyCastLUD :: CastT
 applyCastLUD l v t1 t2 = if isShallowConsistent t1 t2 then
                            case (t1,t2,v) of
-                            (Dyn, t, VCast v2 l2 t3 Dyn) -> applyCastLD l v2 t3 t2
+                            (Dyn, t, VCast v2 l2 t3 Dyn) -> applyCastLUD l v2 t3 t2
                             (Fun Dyn Dyn, Dyn, _) -> VCast v l (Fun Dyn Dyn) Dyn
                             (Fun t11 t12, Dyn, _) -> VCast (VCast v l (Fun t11 t12) (Fun Dyn Dyn)) l (Fun Dyn Dyn) Dyn
                             _ -> mkCast l v t1 t2
@@ -64,7 +66,7 @@ applyCastLUD l v t1 t2 = if isShallowConsistent t1 t2 then
 -- | Performs function application.
 applyLazy :: CastT -> AppT
 applyLazy cast (VCast v l (Fun t1 t2) (Fun t3 t4)) v2 = applyLazy cast v (cast l v2 t3 t1) >>= \x -> return $ cast l x t2 t4
-applyLazy cast (Closure (x,_) e env) v = extendEnv (x,v) env (interp cast (applyLazy cast) e)
+applyLazy cast (Closure (x,_) e env) v = extendEnv (x,v) env $ interp cast (applyLazy cast) e
 applyLazy _ _ _ = throwError EvCallNonFunctionNonCast
 
 
@@ -81,16 +83,26 @@ interp _ _ (Var v) = lookupVal v
 interp cast app (IApp e1 e2) = interp cast app e1 >>= \f -> interp cast app e2 >>= app f
 interp cast app (AnnLam x e) = ask >>= return . (Closure x e)
 interp cast app (ICast e l t1 t2) = (interp cast app e) >>= \v -> return $ cast l v t1 t2
+interp cast app (IGRef e) = interp cast app e >>= \v -> get >>= \x@(Heap {heap = h, top = a}) -> put (Heap {heap = H.insert a v h, top = a+1}) >>= \_ -> return $ VAddr a
+interp cast app (IGDeRef e) = interp cast app e >>= \v -> case v of
+                                                            (VAddr a) -> get >>= \x@(Heap {heap = h}) -> maybe (throwError EvBadLocation) return (H.lookup a h)
+                                                            _ -> throwError EvBadReference
+interp cast app (IGAssign e1 e2) = interp cast app e1 >>= \v -> case v of
+                                                                 (VAddr a) -> get >>= \x@(Heap {heap = h}) ->
+                                                                                       case H.lookup a h of
+                                                                                        Nothing -> throwError EvBadLocation
+                                                                                        _ -> interp cast app e2 >>= \v2 -> let h' = H.adjust (const v2) a h in put (x{heap = h'}) >> return v2
+                                                                 _ -> throwError EvBadReference
 
 
 -- | Interpreter for the intermediate language with lazy down casts.
 interpLD :: Exp -> IO (Either EvErr Value)
-interpLD e = runErrorT $ runReaderT (interp applyCastLD (applyLazy applyCastLD) e) (Env {env = Map.empty})
+interpLD e = runErrorT $ runReaderT (runStateT (interp applyCastLD (applyLazy applyCastLD) e) (Heap {heap=H.empty, top = 0})) (Env {env = M.empty}) >>= return . fst
 
 
 -- | Interpreter for the intermediate language with lazy up down casts.
 interpLUD :: Exp -> IO (Either EvErr Value)
-interpLUD e = runErrorT $ runReaderT (interp applyCastLUD (applyLazy applyCastLUD) e) (Env {env = Map.empty})
+interpLUD e = runErrorT $ runReaderT (runStateT (interp applyCastLUD (applyLazy applyCastLUD) e) (Heap {heap=H.empty, top = 0})) (Env {env = M.empty}) >>= return . fst
 
 
 -- | Returns the corresponding source and target type of a coercion.
