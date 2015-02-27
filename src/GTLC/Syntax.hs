@@ -22,6 +22,7 @@ data EvErr =
   | EvCallNonFunctionNonCast
   | EvBadReference
   | EvBadLocation
+  | EvCoercionFailed
   deriving (Eq)
 
 
@@ -35,39 +36,44 @@ instance Show EvErr where
   show EvCallNonFunctionNonCast = "The expression in the function position is neither a function nor a cast of one"
   show EvBadReference = "The expression in the reference position is not a reference"
   show EvBadLocation = "Trying to access unallocated memory location"
+  show EvCoercionFailed = "Trying to coerce from one type to another and they are not consistent"
 
 data Operator = Inc | Dec | ZeroQ deriving (Show,Eq,Read)
 
-data Exp =
+data SExp =
   -- Surface language
   N Int
   | B Bool
-  | Op Operator Exp BlameLabel
-  | If Exp Exp Exp BlameLabel 
+  | Op Operator SExp
+  | If SExp SExp SExp
   | Var Name
-  | App Exp Exp BlameLabel
-  | Lam Name Exp
-  | AnnLam (Name,Type) Exp
-  | Cast Exp BlameLabel Type
-  | GRef Exp
-  | GDeRef Exp BlameLabel
-  | GAssign Exp Exp BlameLabel
-    --Intermediate language
-  | IOp Operator Exp
-  | ICast Exp BlameLabel Type Type
-  | IApp Exp Exp
-  | IIf Exp Exp Exp
-  | IGRef Exp
-  | IGDeRef Exp
-  | IGAssign Exp Exp
+  | App SExp SExp
+  | Lam Name SExp
+  | AnnLam (Name,Type) SExp
+  | GRef SExp
+  | GDeRef SExp
+  | GAssign SExp SExp
   deriving (Show,Eq,Read)
+
+data IExp = 
+  --Intermediate language
+  IN Int
+  | IB Bool
+  | IOp Operator IExp
+  | IIf IExp IExp IExp
+  | IVar Name
+  | IApp IExp IExp
+  | IAnnLam (Name,Type) IExp
+  | IGRef IExp
+  | IGDeRef IExp
+  | IGAssign IExp IExp
+  | IC IExp Coercion
+  deriving (Show,Eq)
 
 data Value =
   VN Int
   | VB Bool
-  | Closure (Name,Type) Exp Env
-  | VCast Value BlameLabel Type Type
-  | VBlame BlameLabel
+  | Closure (Name,Type) IExp Env
   | VAddr Int
   deriving (Show)
 
@@ -81,37 +87,34 @@ data Type =
 
 data Coercion = 
   IdC Type
-  | InjC Type
-  | ProjC Type BlameLabel
+  | InjC Type -- !
+  | ProjC Type -- ?
   | FunC Coercion Coercion
   | SeqC Coercion Coercion
-  | FailC BlameLabel Type Type
-  | CGRef Coercion Coercion
-
-
-type BlameLabel = String
+  | FailC Type Type
+  | RefC Coercion Coercion
+  deriving (Show,Eq)
 
 type Name = String
 
 
 -- | Translates values to expressions.
-valToExp :: Value -> Exp
-valToExp (VN x) = (N x)
-valToExp (VB x) = (B x)
-valToExp (Closure p@(x,t) e envx) = AnnLam p $ substExp e envx
-valToExp (VCast e l t1 t2) = Cast (valToExp e) l t2
+valToSExp :: Value -> SExp
+valToSExp (VN x) = (N x)
+valToSExp (VB x) = (B x)
+valToSExp (Closure p@(x,t) e envx) = AnnLam p $ substIExp e envx
 
 
 -- | Substitutes variables with values in the environment and translates from the intermediate language to the surface language.
-substExp :: Exp -> Env -> Exp
-substExp (Op op e l) envx = Op op (substExp e envx) l
-substExp (If e1 e2 e3 l) envx = If (substExp e1 envx) (substExp e2 envx) (substExp e3 envx) l
-substExp (App e1 e2 l) envx = App (substExp e1 envx) (substExp e2 envx) l
-substExp (Cast e l t) envx = Cast (substExp e envx) l t
-substExp (IOp op e) envx = Op op (substExp e envx) ""
-substExp (IIf e1 e2 e3) envx = If (substExp e1 envx) (substExp e2 envx) (substExp e3 envx) ""
-substExp v@(Var x) (Env envx) = maybe v valToExp (M.lookup x envx)
-substExp (IApp e1 e2) envx = App (substExp e1 envx) (substExp e2 envx) ""
-substExp (AnnLam x e) envx = AnnLam x (substExp e envx)
-substExp (ICast e _ _ _) envx = substExp e envx
-substExp e _ = e
+substIExp :: IExp -> Env -> SExp
+substIExp (IN n) envx = N n
+substIExp (IB b) envx = B b
+substIExp (IOp op e) envx = Op op $ substIExp e envx
+substIExp (IIf e1 e2 e3) envx = If (substIExp e1 envx) (substIExp e2 envx) $ substIExp e3 envx
+substIExp (IVar x) (Env envx) = maybe (Var x) valToSExp (M.lookup x envx)
+substIExp (IApp e1 e2) envx = App (substIExp e1 envx) $ substIExp e2 envx
+substIExp (IAnnLam x e) envx = AnnLam x $ substIExp e envx
+substIExp (IGRef e) envx = GRef $ substIExp e envx
+substIExp (IGDeRef e) envx = GDeRef $ substIExp e envx
+substIExp (IGAssign e1 e2) envx = GAssign (substIExp e1 envx) $ substIExp e2 envx
+substIExp (IC e _) envx = substIExp e envx

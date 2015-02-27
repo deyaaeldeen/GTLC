@@ -35,7 +35,7 @@ elementsMaybe xs = Just $ elements xs
 
 
 -- | Randomly selects a variable that has a specific type from the context
-pickName :: MonadReader Gamma m => Type -> m (Maybe (Gen Exp))
+pickName :: MonadReader Gamma m => Type -> m (Maybe (Gen SExp))
 pickName t1 = asks ctx >>= \c -> return $ elementsMaybe [Var x | (x,t2) <- c, t2 == t1]
 
 
@@ -55,18 +55,18 @@ extendCtx v g@(Gamma {ctx = cs}) = g{ctx = v:cs}
 
 
 -- | Generates expressions for int expressions
-genExpInt :: Gen Exp -> TsMonad Exp
-genExpInt e = asks size >>= \s ->
+genSExpInt :: Gen SExp -> TsMonad SExp
+genSExpInt e = asks size >>= \s ->
   if s > 0
   then
-    updtMSize (s-1) $ genExpInt $ liftM3 Op (elements [Inc,Dec]) e (return "")
+    updtMSize (s-1) $ genSExpInt $ liftM2 Op (elements [Inc,Dec]) e
   else
     lift e
 
 
 -- | Generates an expression that has a ZeroQ on the top so the type of the result expression is BoolTy
-genExpBool :: Gen Exp -> Gen Exp
-genExpBool e = liftM3 Op (return ZeroQ) e (return "")
+genSExpBool :: Gen SExp -> Gen SExp
+genSExpBool e = liftM2 Op (return ZeroQ) e
 
 
 -- | Generates arbitrary type
@@ -86,64 +86,64 @@ genConsistentType = elements . consistent
 
 
 -- | Generates application expressions
-genExpApp :: Gen Type -> TsMonad Exp
-genExpApp t = ask >>= \g@(Gamma{size = s}) ->
+genSExpApp :: Gen Type -> TsMonad SExp
+genSExpApp t = ask >>= \g@(Gamma{size = s}) ->
   if s > 0
   then
-    lift t >>= \t2 -> lift $ genType >>= \t1 -> elements [t1,Dyn] >>= \td -> liftM3 App (runReaderT (genExp $ return $ Fun td t2) (newSize (s `div` 2) g)) (runReaderT (genExp $ genConsistentType t1) (newSize (s `div` 2) g)) (return "")
+    lift t >>= \t2 -> lift $ genType >>= \t1 -> elements [t1,Dyn] >>= \td -> liftM2 App (runReaderT (genSExp $ return $ Fun td t2) (newSize (s `div` 2) g)) (runReaderT (genSExp $ genConsistentType t1) (newSize (s `div` 2) g))
   else
-    genExp t
+    genSExp t
 
 
 -- | Generates an expression that has a specific type
-genExp :: Gen Type -> TsMonad Exp
-genExp t = lift t >>= \tp -> ask >>= \g@(Gamma{size = s}) -> pickName tp >>= \randVar ->
+genSExp :: Gen Type -> TsMonad SExp
+genSExp t = lift t >>= \tp -> ask >>= \g@(Gamma{size = s}) -> pickName tp >>= \randVar ->
   case tp of
    IntTy -> let values = (1,liftM N arbitrary):(maybe [] (\x->[(2,x)]) randVar) in
              if s > 0
              then
-               lift $ frequency (values ++ [(3,runReaderT (genExpIf tp) g),(4,runReaderT (genExpInt $ liftM N arbitrary) g),(4,runReaderT (genExpApp t) (newSize (s `div` 2) g))])
+               lift $ frequency (values ++ [(3,runReaderT (genSExpIf tp) g),(4,runReaderT (genSExpInt $ liftM N arbitrary) g),(4,runReaderT (genSExpApp t) (newSize (s `div` 2) g))])
              else
                lift $ frequency values
    BoolTy -> let values = (1,liftM B arbitrary):(maybe [] (\x->[(2,x)]) randVar) in
               if s > 0
               then
-                lift $ frequency (values ++ [(3,runReaderT (genExpIf tp) g),(4,genExpBool $ runReaderT (genExpInt $ liftM N arbitrary) (newSize (s-1) g)),(4,runReaderT (genExpApp t) g)])
+                lift $ frequency (values ++ [(3,runReaderT (genSExpIf tp) g),(4,genSExpBool $ runReaderT (genSExpInt $ liftM N arbitrary) (newSize (s-1) g)),(4,runReaderT (genSExpApp t) g)])
               else
                 lift $ frequency values
-   (Fun t1 t2) -> let values = (1,runReaderT (genExpAnnLam t1 t2) g):(1,runReaderT (genExpLam t1 t2) g):(maybe [] (\x-> [(2,x)]) randVar) in
+   (Fun t1 t2) -> let values = (1,runReaderT (genSExpAnnLam t1 t2) g):(1,runReaderT (genSExpLam t1 t2) g):(maybe [] (\x-> [(2,x)]) randVar) in
                    if s > 0
                    then
-                     lift $ frequency (values ++ [(3,runReaderT (genExpIf tp) g),(4,runReaderT (genExpApp t) g)])
+                     lift $ frequency (values ++ [(3,runReaderT (genSExpIf tp) g),(4,runReaderT (genSExpApp t) g)])
                    else
                      lift $ frequency values
    Dyn -> undefined
 
 
 -- | Generates conditional expressions
-genExpIf :: Type -> TsMonad Exp
-genExpIf t = ask >>= \g@(Gamma{size = s}) -> liftM4 If (updtMSize (s `div` 3) (genExp $ genConsistentType BoolTy)) (updtMSize (s `div` 3) (genExp $ genConsistentType t)) (updtMSize (s `div` 3) (genExp $ genConsistentType t)) (return "")
+genSExpIf :: Type -> TsMonad SExp
+genSExpIf t = ask >>= \g@(Gamma{size = s}) -> liftM3 If (updtMSize (s `div` 3) (genSExp $ genConsistentType BoolTy)) (updtMSize (s `div` 3) (genSExp $ genConsistentType t)) (updtMSize (s `div` 3) (genSExp $ genConsistentType t))
 
 
 -- | Generates a lambda abstraction without annotation
-genExpLam :: Type -> Type -> TsMonad Exp
-genExpLam t1 t2 = ask >>= \g@(Gamma{size = s}) -> lift $ genName >>= \x -> liftM2 Lam (return x) (runReaderT (genExp $ return t2) (extendCtx (x,t1) (newSize (s-1) g)))
+genSExpLam :: Type -> Type -> TsMonad SExp
+genSExpLam t1 t2 = ask >>= \g@(Gamma{size = s}) -> lift $ genName >>= \x -> liftM2 Lam (return x) (runReaderT (genSExp $ return t2) (extendCtx (x,t1) (newSize (s-1) g)))
 
 
 -- | Generates a lambda abstraction with annotation
-genExpAnnLam :: Type -> Type -> TsMonad Exp
-genExpAnnLam t1 t2 = ask >>= \g@(Gamma{size = s}) -> lift $ genName >>= \x -> liftM2 AnnLam (return (x,t1)) (runReaderT (genExp $ return t2) (extendCtx (x,t1) (newSize (s-1) g)))
+genSExpAnnLam :: Type -> Type -> TsMonad SExp
+genSExpAnnLam t1 t2 = ask >>= \g@(Gamma{size = s}) -> lift $ genName >>= \x -> liftM2 AnnLam (return (x,t1)) (runReaderT (genSExp $ return t2) (extendCtx (x,t1) (newSize (s-1) g)))
 
-instance Arbitrary Exp where
-      arbitrary = sized $ \n -> runReaderT (genExp arbitrary) Gamma {ctx=[],size=n}
+instance Arbitrary SExp where
+      arbitrary = sized $ \n -> runReaderT (genSExp arbitrary) Gamma {ctx=[],size=n}
 
-propTypePresLD :: Exp -> Property
+propTypePresLD :: SExp -> Property
 propTypePresLD e = monadicIO $ do et1 <- run $ runTypeCheck e
                                   _ <- case et1 of
                                         Right (ie,t1) ->
                                           do ve <- run $ interpLD ie
                                              case ve of
-                                              Right v -> do et2 <- run $ runTypeCheck (valToExp v)
+                                              Right v -> do et2 <- run $ runTypeCheck (valToSExp v)
                                                             _ <- case et2 of
                                                                   Right (_,t2) -> assert $ isConsistent t1 t2
                                                                   Left _ -> fail "does not type check 1"
@@ -153,13 +153,13 @@ propTypePresLD e = monadicIO $ do et1 <- run $ runTypeCheck e
                                   return ()
 
 
-propTypePresLUD :: Exp -> Property
+propTypePresLUD :: SExp -> Property
 propTypePresLUD e = monadicIO $ do et1 <- run $ runTypeCheck e
                                    _ <- case et1 of
                                          Right (ie,t1) ->
                                            do ve <- run $ interpLUD ie
                                               case ve of
-                                               Right v -> do et2 <- run $ runTypeCheck (valToExp v)
+                                               Right v -> do et2 <- run $ runTypeCheck (valToSExp v)
                                                              _ <- case et2 of
                                                                    Right (_,t2) -> assert $ isConsistent t1 t2
                                                                    Left _ -> fail "does not type check 1"
