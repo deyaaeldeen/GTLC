@@ -1,4 +1,4 @@
-{-# LANGUAGE NamedFieldPuns, FlexibleContexts, ViewPatterns #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches -fwarn-incomplete-patterns #-}
 
 module GTLC.TypeChecker(runTypeCheck, mkCoerceLUD, seqL, isConsistent) where
@@ -33,54 +33,6 @@ typeof (Op Inc _) = Fun IntTy IntTy
 typeof (Op Dec _) = Fun IntTy IntTy
 typeof (Op ZeroQ _) = Fun IntTy BoolTy
 
-
--- | Modeling the environment and the error monads
-
-data Gamma = Gamma {ctx :: Map.Map Name Type}
-
-data TyErr =
-  -- Type Errors
-  PrimitiveOperator Operator Type
-  | IllTypedIfExp String
-  | ArgParamMismatch Type Type
-  | CallNonFunction
-  | UndefinedVar Name
-  | BadDereference Type
-  | BadAssignment Type
-  | IllTypedAssignment Type Type
-  -- Cast Errors
-  | CastBetweenInconsistentTypes Type Type
-  -- Unknown
-  | UnknownTyError String
-  deriving (Eq)
-
-instance Error TyErr where
-  strMsg msg = UnknownTyError msg
-
-instance Show TyErr where
-  show (PrimitiveOperator op t) = "The argument to " ++ show op ++ " has the type " ++ show t ++ " which is not consistent"
-  show (IllTypedIfExp s) = s
-  show (ArgParamMismatch t1 t2) = "The argument to the function has type " ++ show t2 ++ " that is not consistent with the type of the function parameter " ++ show t1
-  show CallNonFunction = "The expression in the function position is not of Function type"
-  show (UndefinedVar v) = "The variable " ++ show v ++ " is not bound"
-  show (CastBetweenInconsistentTypes t1 t2) = "You can not cast between " ++ show t1 ++ " and " ++ show t2 ++ " because they are inconsistent"
-  show (UnknownTyError s) = s
-  show (BadDereference t) = "Trying to dereference an expression of type " ++ show t ++ " which is not a reference type"
-  show (BadAssignment t) = "Trying to assign an expression to another of type " ++ show t ++ " which is not a reference type"
-  show (IllTypedAssignment t1 t2) = "Trying to assign an expression of type "  ++ show t2 ++ " to a reference of type " ++ show t1 ++ " and they are not consistent"
-
-type TcMonad = ReaderT Gamma (ErrorT TyErr IO)
-
-
--- | Look for the type of a variable in the context
--- throwing an error if the name doesn't exist.
-lookupTy :: (MonadReader Gamma m, MonadError TyErr m) => Name -> m Type
-lookupTy v = asks ctx >>= \ctx -> maybe (throwError $ UndefinedVar v) return (Map.lookup v ctx)
-
-
--- | Extend the context with a new binding.
-extendCtx :: (MonadReader Gamma m) => (Name, Type) -> m a -> m a
-extendCtx (x,t) = local $ \m@(Gamma {ctx = cs}) -> m {ctx = Map.insert x t cs}
 
 type CoerceT = Type -> Type -> Coercion
 
@@ -134,11 +86,11 @@ seqL _ (IdC _) c = c
 seqL _ c (IdC _) = c
 seqL c (InjC t1) (ProjC t2) = c t1 t2
 seqL c (FunC c11 c12) (FunC c21 c22) = FunC (seqL c c21 c11) (seqL c c12 c22)
-seqL c f@(FailC t1 t2) _ = f
-seqL c (InjC _) f@(FailC t1 t2) = f
-seqL c (FunC _ _) f@(FailC t1 t2) = f
+seqL _ f@(FailC _ _) _ = f
+seqL _ (InjC _) f@(FailC _ _) = f
+seqL _ (FunC _ _) f@(FailC _ _) = f
 --seqL c (SeqC c1 c2) c3 = seqL c c1 $ seqL c c2 c3
---seqL c a@(ProjC t) b@(SeqC (FunC c1 c2) c3) = SeqC a b
+--seqL c a@(ProjC _) b@(SeqC (FunC _ _) _) = SeqC a b
 --seqL c c1 (SeqC c2 c3) = seqL c (seqL c c1 c2) c3
 seqL _ c1 c2 = SeqC c1 c2
 
@@ -156,7 +108,7 @@ typecheck (If e e1 e2) = typecheck e >>= \(e',t) -> typecheck e1 >>= \(e1', t1) 
     throwError $ IllTypedIfExp "The condition of the If expression is not consistent with the boolean type"
 typecheck (Var x) = lookupTy x >>= \t -> return (IVar x,t)
 typecheck (Lam x e) = typecheck $ AnnLam (x,Dyn) e
-typecheck (AnnLam v@(_,t1) e) = extendCtx v (typecheck e) >>= \(e',t2) -> return (IAnnLam v e', Fun t1 t2)
+typecheck (AnnLam v@(_,t1) e) = extendTyCtx v (typecheck e) >>= \(e',t2) -> return (IAnnLam v e', Fun t1 t2)
 typecheck (App e1 e2) = typecheck e2 >>= \(e2',t2) -> typecheck e1 >>= \(e1',t1) -> case t1 of
                                                                               Dyn -> return (IApp (mkCoerce e1' Dyn (Fun t2 Dyn)) e2', Dyn)
                                                                               (Fun t11 t12) -> if isConsistent t2 t11 then return (IApp e1' $ mkCoerce e2' t2 t11, t12) else throwError $ ArgParamMismatch t11 t2
@@ -170,12 +122,13 @@ typecheck (GAssign e1 e2) = typecheck e1 >>= \(e1',t1) -> case t1 of
                                                            (GRefTy t') -> typecheck e2 >>= \(e2',t2) -> if isConsistent t' t2 then return (IGAssign e1' $ mkCoerce e2' t2 t', t2) else throwError $ IllTypedAssignment t' t2
                                                            Dyn -> typecheck e2 >>= \(e2',t2) -> return (IGAssign (mkCoerce e1' Dyn (GRefTy Dyn)) $ mkCoerce e2' t2 Dyn, Dyn)
                                                            _ -> throwError $ BadAssignment t1
+typecheck (Let var e1 e2) = typecheck e1 >>= \(e1',t1) -> extendTyCtx (var,t1) $ typecheck e2 >>= \(e2',t2) -> return (ILet var e1' e2', t2)
 typecheck _ = throwError $ UnknownTyError "Unknown Error!"
 
 
-runTcMonad :: TcMonad a -> Gamma -> IO (Either TyErr a)
+runTcMonad :: TcMonad a -> TyGamma -> IO (Either TyErr a)
 runTcMonad m = runErrorT . (runReaderT m)
 
 
 runTypeCheck :: SExp -> IO (Either TyErr (IExp, Type))
-runTypeCheck e = runTcMonad (typecheck e) (Gamma {ctx = Map.empty})
+runTypeCheck e = runTcMonad (typecheck e) (TyGamma {tyCtx = Map.empty})

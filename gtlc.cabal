@@ -46,7 +46,7 @@ Test-Suite test
   Hs-Source-Dirs: test
   Type: detailed-0.9
   test-module: Test
-  other-extensions:    NamedFieldPuns, FlexibleContexts, TemplateHaskell
+  other-extensions:    NamedFieldPuns, FlexibleContexts
   ghc-options:
     -fwarn-incomplete-patterns -Wall
   Build-Depends:
