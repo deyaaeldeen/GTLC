@@ -3,12 +3,12 @@
 
 module GTLC.Syntax where
 
-import Control.Monad.Error
-import Control.Monad.Reader
-import Control.Monad.State
-import Test.QuickCheck
+import Control.Monad.Error (Error(..), ErrorT, MonadError, throwError)
+import Control.Monad.Reader (ReaderT, MonadReader, asks, local)
+import Control.Monad.State (StateT, liftM, liftM2)
+import Test.QuickCheck (Arbitrary, Gen, arbitrary, elements)
 import Data.HashMap.Lazy as H
-import qualified Data.Map as M
+import qualified Data.Map.Lazy as M
 
 
 data Operator = Inc | Dec | ZeroQ deriving (Show,Eq,Read)
@@ -191,9 +191,23 @@ extendEvEnv (x,v) m@(EvEnv {evEnv = en}) = local (\_ -> m { evEnv = M.insert x v
 
 -- Testing stuff
 
-data TsGamma = TsGamma {ctx :: [(Name,Type)], size :: Int}
+data TsGamma = TsGamma {tsCtx :: M.Map Name Type, tsSize :: Int}
 
 type TsMonad = ReaderT TsGamma Gen
+
+-- | Changes the size field of a gamma
+newSize :: Int -> TsGamma -> TsGamma
+newSize n g = g{tsSize = n}
+
+
+-- | Changes the size field of a gamma in reader monad
+updtMSize :: Int -> TsMonad SExp -> TsMonad SExp
+updtMSize = local . newSize
+
+
+-- | Extend the context with a new binding, enforcing shadowing.
+extendTsCtx :: (MonadReader TsGamma m) => (Name, Type) -> m a -> m a
+extendTsCtx (k,v) = local (\ m@(TsGamma {tsCtx = cs}) -> m { tsCtx = M.insert k v cs })
 
 
 instance Arbitrary Operator where

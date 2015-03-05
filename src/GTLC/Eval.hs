@@ -3,9 +3,9 @@
 
 module GTLC.Eval(interpD, interpUD) where
 
-import Control.Monad.Error
-import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.Error (runErrorT, throwError)
+import Control.Monad.Reader (runReaderT, asks, ask)
+import Control.Monad.State (runStateT, get, put)
 import Data.HashMap.Lazy as H
 import qualified Data.Map as M
 

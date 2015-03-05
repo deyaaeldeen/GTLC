@@ -1,11 +1,11 @@
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns, TupleSections #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches -fwarn-incomplete-patterns #-}
 
 module GTLC.TypeChecker(runTypeCheck, mkCoerceLUD, seqL, isConsistent) where
 
-import Control.Monad.Error
-import Control.Monad.Reader
-import qualified Data.Map as Map
+import Control.Monad.Error (throwError, runErrorT)
+import Control.Monad.Reader (runReaderT)
+import qualified Data.Map as M
 
 import GTLC.Syntax
 
@@ -89,9 +89,9 @@ seqL c (FunC c11 c12) (FunC c21 c22) = FunC (seqL c c21 c11) (seqL c c12 c22)
 seqL _ f@(FailC _ _) _ = f
 seqL _ (InjC _) f@(FailC _ _) = f
 seqL _ (FunC _ _) f@(FailC _ _) = f
---seqL c (SeqC c1 c2) c3 = seqL c c1 $ seqL c c2 c3
---seqL c a@(ProjC _) b@(SeqC (FunC _ _) _) = SeqC a b
---seqL c c1 (SeqC c2 c3) = seqL c (seqL c c1 c2) c3
+seqL c (SeqC c1 c2) c3 = seqL c c1 $ seqL c c2 c3
+seqL c a@(ProjC _) b@(SeqC (FunC _ _) _) = SeqC a b
+seqL c c1 (SeqC c2 c3) = seqL c (seqL c c1 c2) c3
 seqL _ c1 c2 = SeqC c1 c2
 
 
@@ -100,13 +100,14 @@ typecheck :: SExp -> TcMonad (IExp,Type)
 typecheck e@(N n) = return (IN n, typeof e)
 typecheck e@(B b) = return (IB b, typeof e)
 typecheck e@(Op op e1) = typecheck e1 >>= \(e1',t) -> let (Fun t1 t2) = typeof e in if (isConsistent t t1) then return (IOp op $ mkCoerce e1' t t1, t2) else throwError $ PrimitiveOperator op t
-typecheck (If e e1 e2) = typecheck e >>= \(e',t) -> typecheck e1 >>= \(e1', t1) -> typecheck e2 >>= \(e2', t2) -> if (isConsistent t BoolTy) && (isConsistent t1 t2) then
+typecheck (If e e1 e2) = typecheck e >>= \(e',t) ->
+  if isConsistent t BoolTy then typecheck e1 >>= \(e1', t1) -> typecheck e2 >>= \(e2', t2) ->
     case meet t1 t2 of
      Just if_T -> return ((IIf (mkCoerce e' t BoolTy) (mkCoerce e1' t1 if_T) (mkCoerce e2' t2 if_T)), if_T)
-     Nothing -> throwError $ IllTypedIfExp "The two arms of the If expression do not have consistent types"
-    else
-    throwError $ IllTypedIfExp "The condition of the If expression is not consistent with the boolean type"
-typecheck (Var x) = lookupTy x >>= \t -> return (IVar x,t)
+     Nothing -> throwError $ IllTypedIfExp $ "The two arms of the If expression have the types " ++ show t1 ++ " and " ++ show t2 ++ " and they are not consistent"
+  else
+    throwError $ IllTypedIfExp $ "The condition of the If expression has type " ++ show t ++ " which is not consistent with the boolean type"
+typecheck (Var x) = lookupTy x >>= return . (IVar x,)
 typecheck (Lam x e) = typecheck $ AnnLam (x,Dyn) e
 typecheck (AnnLam v@(_,t1) e) = extendTyCtx v (typecheck e) >>= \(e',t2) -> return (IAnnLam v e', Fun t1 t2)
 typecheck (App e1 e2) = typecheck e2 >>= \(e2',t2) -> typecheck e1 >>= \(e1',t1) -> case t1 of
@@ -120,7 +121,7 @@ typecheck (GDeRef e) = typecheck e >>= \(e',t) -> case t of
                                                    _ -> throwError $ BadDereference t
 typecheck (GAssign e1 e2) = typecheck e1 >>= \(e1',t1) -> case t1 of
                                                            (GRefTy t') -> typecheck e2 >>= \(e2',t2) -> if isConsistent t' t2 then return (IGAssign e1' $ mkCoerce e2' t2 t', t2) else throwError $ IllTypedAssignment t' t2
-                                                           Dyn -> typecheck e2 >>= \(e2',t2) -> return (IGAssign (mkCoerce e1' Dyn (GRefTy Dyn)) $ mkCoerce e2' t2 Dyn, Dyn)
+                                                           Dyn -> typecheck e2 >>= \(e2',t2) -> return (IGAssign (mkCoerce e1' Dyn $ GRefTy Dyn) $ mkCoerce e2' t2 Dyn, Dyn)
                                                            _ -> throwError $ BadAssignment t1
 typecheck (Let var e1 e2) = typecheck e1 >>= \(e1',t1) -> extendTyCtx (var,t1) $ typecheck e2 >>= \(e2',t2) -> return (ILet var e1' e2', t2)
 typecheck _ = throwError $ UnknownTyError "Unknown Error!"
@@ -131,4 +132,4 @@ runTcMonad m = runErrorT . (runReaderT m)
 
 
 runTypeCheck :: SExp -> IO (Either TyErr (IExp, Type))
-runTypeCheck e = runTcMonad (typecheck e) (TyGamma {tyCtx = Map.empty})
+runTypeCheck e = runTcMonad (typecheck e) (TyGamma {tyCtx = M.empty})
