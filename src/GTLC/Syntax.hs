@@ -27,6 +27,7 @@ data SExp =
   | GDeRef SExp
   | GAssign SExp SExp
   | Let Name SExp SExp
+  | C SExp Coercion
   deriving (Show,Eq,Read)
 
 data IExp = 
@@ -50,6 +51,7 @@ data Value =
   | VB Bool
   | Closure (Name,Type) IExp EvEnv
   | VAddr Int
+  | VC Value Coercion
   deriving (Show)
 
 data Type =
@@ -67,8 +69,8 @@ data Coercion =
   | FunC Coercion Coercion
   | SeqC Coercion Coercion
   | FailC Type Type
-  | RefC Coercion Coercion
-  deriving (Show,Eq)
+  | RefC Coercion Coercion -- write read
+  deriving (Show,Eq,Read)
 
 type Name = String
 
@@ -77,24 +79,26 @@ type Name = String
 valToSExp :: (Value,EvHeap) -> SExp
 valToSExp (VN x,_) = (N x)
 valToSExp (VB x,_) = (B x)
-valToSExp (Closure x e envx,h) = AnnLam x $ substIExp e envx h
+valToSExp (Closure v@(x,_) e envx,h) = AnnLam v $ substIExp [x] e envx h
 valToSExp (VAddr a, hp@EvHeap{evHeap=h}) = GRef $ valToSExp $ (maybe undefined id $ H.lookup a h,hp)
+valToSExp (VC v c,h) = C (valToSExp (v,h)) c
 
 
 -- | Substitutes variables with values in the environment and translates from the intermediate language to the surface language.
-substIExp :: IExp -> EvEnv -> EvHeap -> SExp
-substIExp (IN n) envx _ = N n
-substIExp (IB b) envx _ = B b
-substIExp (IOp op e) envx h = Op op $ substIExp e envx h
-substIExp (IIf e1 e2 e3) envx h = If (substIExp e1 envx h) (substIExp e2 envx h) $ substIExp e3 envx h
-substIExp (IVar x) (EvEnv envx) h = maybe (Var x) (\v->valToSExp (v,h)) (M.lookup x envx)
-substIExp (IApp e1 e2) envx h = App (substIExp e1 envx h) $ substIExp e2 envx h
-substIExp (IAnnLam x e) envx h = AnnLam x $ substIExp e envx h
-substIExp (IGRef e) envx h = GRef $ substIExp e envx h
-substIExp (IGDeRef e) envx h = GDeRef $ substIExp e envx h
-substIExp (IGAssign e1 e2) envx h = GAssign (substIExp e1 envx h) $ substIExp e2 envx h
-substIExp (ILet v e1 e2) envx h = Let v (substIExp e1 envx h) $ substIExp e2 envx h
-substIExp (IC e _) envx h = substIExp e envx h
+-- The first argument is the list of variables binded after the ones in the environment, so no substitution should happen to them.
+substIExp :: [Name] -> IExp -> EvEnv -> EvHeap -> SExp
+substIExp _ (IN n) envx _ = N n
+substIExp _ (IB b) envx _ = B b
+substIExp x' (IOp op e) envx h = Op op $ substIExp x' e envx h
+substIExp x' (IIf e1 e2 e3) envx h = If (substIExp x' e1 envx h) (substIExp x' e2 envx h) $ substIExp x' e3 envx h
+substIExp x' var@(IVar x) (EvEnv envx) h = if elem x x' then Var x else maybe (Var x) (\v->valToSExp (v,h)) (M.lookup x envx)
+substIExp x' (IApp e1 e2) envx h = App (substIExp x' e1 envx h) $ substIExp x' e2 envx h
+substIExp x' (IAnnLam v@(x,_) e) envx h = AnnLam v $ substIExp (x:x') e envx h
+substIExp x' (IGRef e) envx h = GRef $ substIExp x' e envx h
+substIExp x' (IGDeRef e) envx h = GDeRef $ substIExp x' e envx h
+substIExp x' (IGAssign e1 e2) envx h = GAssign (substIExp x' e1 envx h) $ substIExp x' e2 envx h
+substIExp x' (ILet v e1 e2) envx h = Let v (substIExp x' e1 envx h) $ substIExp (v:x') e2 envx h
+substIExp x' (IC e _) envx h = substIExp x' e envx h
 
 ------------------------------------------------------------------------------------
 

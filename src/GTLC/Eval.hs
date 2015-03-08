@@ -13,22 +13,45 @@ import GTLC.Syntax
 import GTLC.TypeChecker
 
 
+-- | Applies a coercion to an expression.
+mkCoerce :: Value -> Coercion -> EvMonad Value
+mkCoerce _ (FailC _ _) = throwError EvCoercionFailed
+mkCoerce _ (FunC (FailC _ _) _) = throwError EvCoercionFailed
+mkCoerce _ (FunC _ (FailC _ _)) = throwError EvCoercionFailed
+mkCoerce _ (RefC (FailC _ _) _) = throwError EvCoercionFailed
+mkCoerce _ (RefC _ (FailC _ _)) = throwError EvCoercionFailed
+mkCoerce v (IdC _) = return v
+mkCoerce (VC v c1) c2 = mkCoerce v $ (seqL mkCoerceLUD) c1 c2
+mkCoerce v c = return $ VC v c
+
+
+-- | Performs coerced application.
+apply :: Value -> Value -> EvMonad Value
+apply (Closure (x,_) e env) v2 = extendEvEnv (x,v2) env $ interp e
+apply (VC v (FunC c d)) v2 = mkCoerce v2 c >>= apply v >>= \v' -> mkCoerce v' d
+apply _ _ = throwError EvCallNonFunctionNonCast
+
+
+-- | Performs coerced de-reference.
+deref :: Value -> EvMonad Value
+deref (VAddr a) = get >>= \x@(EvHeap {evHeap = h}) -> maybe (throwError EvBadLocation) return (H.lookup a h)
+deref (VC v (RefC _ d)) = deref v >>= \v' -> mkCoerce v' d
+deref _ = throwError EvBadReference
+
+
+-- | Performs coerced assignment.
+assign :: Value -> Value -> EvMonad Value
+assign (VAddr a) v2 = get >>= \x@(EvHeap {evHeap = h}) ->
+                               case H.lookup a h of
+                                Nothing -> throwError EvBadLocation
+                                _ -> get >>= \x'@(EvHeap {evHeap = h'}) -> let h'' = H.adjust (const v2) a h' in put (x'{evHeap = h''}) >> return v2
+assign (VC v1 (RefC c d)) v2 = mkCoerce v2 c >>= assign v1 >>= \e -> mkCoerce e d
+assign _ _ = throwError EvBadReference
+
+
 -- | Interprets the intermediate language.
 interp :: IExp -> EvMonad Value
--- error detection
-interp (IC _ (FailC _ _)) = throwError EvCoercionFailed
-interp (IC e (FunC f@(FailC _ _) _)) = interp $ IC e f
-interp (IC e (FunC _ f@(FailC _ _))) = interp $ IC e f
-interp (IC e (RefC f@(FailC _ _) _)) = interp $ IC e f
-interp (IC e (RefC _ f@(FailC _ _))) = interp $ IC e f
--- applying coercions
-interp (IApp (IC e1 (FunC c d)) e2) = interp $ IC (IApp e1 $ IC e2 c) d
-interp (IGDeRef (IC e (RefC _ d))) = interp $ IC (IGDeRef e) d
-interp (IGAssign (IC e1 (RefC c d)) e2) = interp $ IC (IGAssign e1 $ IC e2 c) d
-interp (IC e (IdC _)) = interp e
-interp (IC (IC e d) c) = interp $ IC e (seqL mkCoerceLUD d c)
--- standard evaluation rules
-interp (IC e _) = interp e
+interp (IC e c) = interp e >>= \v -> mkCoerce v c
 interp (IN x) = return (VN x)
 interp (IB x) = return (VB x)
 interp (IOp Inc e) = interp e >>= \(VN v) -> return $ VN(v+1)
@@ -36,20 +59,11 @@ interp (IOp Dec e) = interp e >>= \(VN v) -> return $ VN(v-1)
 interp (IOp ZeroQ e) = interp e >>= \(VN v) -> return $ VB(v == 0)
 interp (IIf e1 e2 e3) = interp e1 >>= \(VB v) -> if v then interp e2 else interp e3
 interp (IVar v) = asks evEnv >>= \env -> maybe (throwError (EvUndefinedVar v)) return (M.lookup v env)
-interp (IApp e1 e2) = interp e1 >>= \case
-  (Closure (x,_) e env) -> interp e2 >>= \v -> extendEvEnv (x,v) env $ interp e
-  _ -> throwError EvCallNonFunctionNonCast
+interp (IApp e1 e2) = interp e1 >>= \v1 -> interp e2 >>= apply v1
 interp (IAnnLam x e) = ask >>= return . (Closure x e)
 interp (IGRef e) = interp e >>= \v -> get >>= \x@(EvHeap {evHeap = h, evTop = a}) -> put (x {evHeap = H.insert a v h, evTop = a+1}) >>= \_ -> return $ VAddr a
-interp (IGDeRef e) = interp e >>= \case
-  (VAddr a) -> get >>= \x@(EvHeap {evHeap = h}) -> maybe (throwError EvBadLocation) return (H.lookup a h)
-  _ -> throwError EvBadReference
-interp (IGAssign e1 e2) = interp e1 >>= \case
-  (VAddr a) -> get >>= \x@(EvHeap {evHeap = h}) ->
-                        case H.lookup a h of
-                         Nothing -> throwError EvBadLocation
-                         _ -> interp e2 >>= \v2 -> get >>= \x'@(EvHeap {evHeap = h'}) -> let h'' = H.adjust (const v2) a h' in put (x'{evHeap = h''}) >> return v2
-  _ -> throwError EvBadReference
+interp (IGDeRef e) = interp e >>= deref
+interp (IGAssign e1 e2) = interp e1 >>= \v1 -> interp e2 >>= assign v1
 interp (ILet var e1 e2) = interp e1 >>= \v1 -> ask >>= \env -> extendEvEnv (var, v1) env $ interp e2
 
 

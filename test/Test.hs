@@ -135,7 +135,7 @@ propTypePres :: (SExp -> IO (Either TyErr (IExp, Type))) -> (IExp -> IO (Either 
 propTypePres typecheck interp e = monadicIO $ run (typecheck e) >>= \case
   Right (ie,t1) -> run (interp ie) >>= \case
     Right v -> run (typecheck $ valToSExp v) >>= \case
-      Right (_,t2) -> assert $ isConsistent t1 t2
+      Right (_,t2) -> assert $ t1 == t2
       Left _ -> fail "does not type check 1"
     Left _ -> fail "does not evaluate"
   Left _ -> fail "does not type check 2"
@@ -143,7 +143,7 @@ propTypePres typecheck interp e = monadicIO $ run (typecheck e) >>= \case
 
 -- | Stress tests the system with a large number of generated instances each is of a big size.
 test :: IO ()
-test = verboseCheckWith Args {replay=Nothing,maxSuccess=10000,maxSize=100,chatty=True,maxDiscardRatio=10} (propTypePres runTypeCheck interpUD)
+test = verboseCheckWith Args {replay=Nothing,maxSuccess=10000,maxSize=10,chatty=True,maxDiscardRatio=10} (propTypePres runTypeCheck interpUD)
 
 
 -- | Converts from QuickCheck result to Distribution.TestSuite result.

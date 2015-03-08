@@ -1,7 +1,7 @@
 {-# LANGUAGE ViewPatterns, TupleSections #-}
 {-# OPTIONS_GHC -Wall -fno-warn-unused-matches -fwarn-incomplete-patterns #-}
 
-module GTLC.TypeChecker(runTypeCheck, mkCoerceLUD, seqL, isConsistent) where
+module GTLC.TypeChecker(runTypeCheck, mkCoerceLUD, seqL) where
 
 import Control.Monad.Error (throwError, runErrorT)
 import Control.Monad.Reader (runReaderT)
@@ -9,20 +9,21 @@ import qualified Data.Map as M
 
 import GTLC.Syntax
 
+
 -- | Computes the greatest lower bound with respect to the ordering relation “less or equally dynamic”.
 meet :: Type -> Type -> Maybe Type
 meet t Dyn = Just t
 meet Dyn t = Just t
-meet IntTy t@IntTy = Just t
-meet BoolTy t@BoolTy = Just t
-meet (Fun t11 t12) (Fun t21 t22) = maybe Nothing (\t1 -> maybe Nothing (Just . (Fun t1)) (meet t12 t22)) (meet t11 t21)
+meet IntTy IntTy = Just IntTy
+meet BoolTy BoolTy = Just BoolTy
+meet (Fun t11 t12) (Fun t21 t22) = maybe Nothing (\t1 -> maybe Nothing (Just . (Fun t1)) $ meet t12 t22) $ meet t11 t21
 meet (GRefTy t1) (GRefTy t2) = maybe Nothing (Just . GRefTy) $ meet t1 t2
 meet _ _ = Nothing
 
 
 -- | Checks if two types are consistent.
 isConsistent :: Type -> Type -> Bool
-isConsistent t1 t2 = maybe False (const True) (meet t1 t2)
+isConsistent t1 t2 = maybe False (const True) $ meet t1 t2
 
 
 -- | Computes the type of a constant or operator.
@@ -60,8 +61,8 @@ mkCoerceLUD BoolTy Dyn = InjC BoolTy
 mkCoerceLUD (Fun t1 t2) Dyn = SeqC (FunC (mkCoerceLUD Dyn t1) (mkCoerceLUD t2 Dyn)) (InjC (Fun Dyn Dyn))
 mkCoerceLUD (Fun t1 t2) (Fun t3 t4) = FunC (mkCoerceLUD t3 t1) (mkCoerceLUD t2 t4)
 mkCoerceLUD (GRefTy t1) (GRefTy t2) = RefC (mkCoerceLUD t2 t1) (mkCoerceLUD t1 t2)
-mkCoerceLUD Dyn t@(GRefTy _) = SeqC (mkCoerceLUD Dyn (GRefTy Dyn)) (mkCoerceLUD (GRefTy Dyn) t)
-mkCoerceLUD t@(GRefTy _) Dyn = SeqC (mkCoerceLUD t (GRefTy Dyn)) (mkCoerceLUD (GRefTy Dyn) Dyn)
+mkCoerceLUD Dyn t@(GRefTy _) = SeqC (ProjC (GRefTy Dyn)) (mkCoerceLUD (GRefTy Dyn) t)
+mkCoerceLUD t@(GRefTy _) Dyn = SeqC (mkCoerceLUD t (GRefTy Dyn)) (InjC (GRefTy Dyn))
 mkCoerceLUD t1 t2 = FailC t1 t2
 
 
@@ -76,8 +77,9 @@ typeofCoercion (IdC t) = (t,t)
 typeofCoercion (InjC t) = (t, Dyn)
 typeofCoercion (ProjC t) = (Dyn, t)
 typeofCoercion (FunC (typeofCoercion -> (t21,t11)) (typeofCoercion -> (t12,t22))) = (Fun t11 t12, Fun t21 t22)
-typeofCoercion (SeqC (typeofCoercion -> (t1,t2)) (typeofCoercion -> (t3,t4))) | t2 == t3 = (t1,t3)
+typeofCoercion (SeqC (typeofCoercion -> (t1,t2)) (typeofCoercion -> (t3,t4))) | t2 == t3 = (t1,t4)
 typeofCoercion (FailC t1 t2) = (t1,t2)
+typeofCoercion (RefC (typeofCoercion -> (t11,t12)) (typeofCoercion -> (t21,t22))) | (t11 == t22) && (t12 == t21) = (GRefTy t12, GRefTy t11)
 
 
 -- | Composes coercion in lazy fashion.
@@ -86,6 +88,7 @@ seqL _ (IdC _) c = c
 seqL _ c (IdC _) = c
 seqL c (InjC t1) (ProjC t2) = c t1 t2
 seqL c (FunC c11 c12) (FunC c21 c22) = FunC (seqL c c21 c11) (seqL c c12 c22)
+seqL c (RefC c11 c12) (RefC c21 c22) = RefC (seqL c c21 c11) (seqL c c12 c22)
 seqL _ f@(FailC _ _) _ = f
 seqL _ (InjC _) f@(FailC _ _) = f
 seqL _ (FunC _ _) f@(FailC _ _) = f
@@ -111,7 +114,7 @@ typecheck (Var x) = lookupTy x >>= return . (IVar x,)
 typecheck (Lam x e) = typecheck $ AnnLam (x,Dyn) e
 typecheck (AnnLam v@(_,t1) e) = extendTyCtx v (typecheck e) >>= \(e',t2) -> return (IAnnLam v e', Fun t1 t2)
 typecheck (App e1 e2) = typecheck e2 >>= \(e2',t2) -> typecheck e1 >>= \(e1',t1) -> case t1 of
-                                                                              Dyn -> return (IApp (mkCoerce e1' Dyn (Fun t2 Dyn)) e2', Dyn)
+                                                                              Dyn -> return (IApp (mkCoerce e1' Dyn (Fun Dyn Dyn)) $ mkCoerce e2' t2 Dyn, Dyn)
                                                                               (Fun t11 t12) -> if isConsistent t2 t11 then return (IApp e1' $ mkCoerce e2' t2 t11, t12) else throwError $ ArgParamMismatch t11 t2
                                                                               _ -> throwError CallNonFunction
 typecheck (GRef e)  = typecheck e >>= \(e',t) -> return (IGRef e', GRefTy t)
@@ -120,10 +123,11 @@ typecheck (GDeRef e) = typecheck e >>= \(e',t) -> case t of
                                                    Dyn -> return (IGDeRef $ mkCoerce e' Dyn (GRefTy Dyn), Dyn)
                                                    _ -> throwError $ BadDereference t
 typecheck (GAssign e1 e2) = typecheck e1 >>= \(e1',t1) -> case t1 of
-                                                           (GRefTy t') -> typecheck e2 >>= \(e2',t2) -> if isConsistent t' t2 then return (IGAssign e1' $ mkCoerce e2' t2 t', t2) else throwError $ IllTypedAssignment t' t2
+                                                           (GRefTy t') -> typecheck e2 >>= \(e2',t2) -> if isConsistent t' t2 then return (IGAssign e1' $ mkCoerce e2' t2 t', t') else throwError $ IllTypedAssignment t' t2
                                                            Dyn -> typecheck e2 >>= \(e2',t2) -> return (IGAssign (mkCoerce e1' Dyn $ GRefTy Dyn) $ mkCoerce e2' t2 Dyn, Dyn)
                                                            _ -> throwError $ BadAssignment t1
 typecheck (Let var e1 e2) = typecheck e1 >>= \(e1',t1) -> extendTyCtx (var,t1) $ typecheck e2 >>= \(e2',t2) -> return (ILet var e1' e2', t2)
+typecheck (C e c) = typecheck e >>= \(e',_) -> let (_,t) = typeofCoercion c in return (IC e' c, t)
 typecheck _ = throwError $ UnknownTyError "Unknown Error!"
 
 
