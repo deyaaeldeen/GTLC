@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts, NamedFieldPuns, LambdaCase #-}
-{-# OPTIONS_GHC -Wall -fno-warn-unused-matches -fwarn-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wall -fno-warn-unused-matches -fwarn-incomplete-patterns -fno-warn-orphans #-}
 
-module Test (main,tests,test) where
+module Test (tests,test) where
 
 import Control.Monad.Reader (MonadReader, runReaderT, lift, liftM, liftM2, liftM3, asks, ask)
 import Test.QuickCheck (Arbitrary, Gen, Property, Args (..), Result (..), Testable, stdArgs, verboseCheckWithResult, verboseCheckWith, vectorOf, elements, arbitrary, frequency, sized)
@@ -156,7 +156,7 @@ toTSResult Failure {reason} = TS.Fail reason
 
 -- | Run a quick check property.
 runQuickCheck :: Testable p => p -> IO TS.Progress
-runQuickCheck prop = verboseCheckWithResult stdArgs {maxSuccess = 255, maxSize = 5, chatty = True, maxDiscardRatio=10} prop >>= return . TS.Finished . toTSResult
+runQuickCheck prop = verboseCheckWithResult stdArgs {maxSuccess = 250, maxSize = 5, chatty = True, maxDiscardRatio=10} prop >>= return . TS.Finished . toTSResult
 
 
 -- | Run a bunch of tests.

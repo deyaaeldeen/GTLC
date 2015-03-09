@@ -12,7 +12,7 @@ before_install:
   - cabal install Cabal
 
 install:
-  - cabal install --only-dependencies --enable-tests --reorder-goals
+  - cabal install --enable-profiling --enable-library-profiling --only-dependencies --enable-tests --reorder-goals
 
 script:
-  - cabal configure --enable-tests && cabal build && cabal test
+  - cabal configure --enable-profiling --enable-library-profiling --enable-tests --enable-benchmarks && cabal build && cabal test
